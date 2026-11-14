@@ -5,7 +5,8 @@ import java.io.File
 
 /**
  * All writable runtime paths are rooted in this app's private files directory.
- * There is deliberately no Termux path or shared-storage fallback.
+ * The /data/data alias is intentional: the runtime binaries are built with
+ * that exact absolute prefix, and Android maps it to the app's user-0 data dir.
  */
 internal data class RuntimePaths(
     val appFiles: File,
@@ -71,16 +72,21 @@ internal data class RuntimePaths(
 
     companion object {
         fun from(context: Context): RuntimePaths {
-            val appFiles = context.filesDir.canonicalFile
-            val runtimeRoot = File(appFiles, "runtime")
+            // The package bootstrap is compiled against /data/data/<applicationId>.
+            // Require this alias to resolve to filesDir so baked-in paths and runtime
+            // environment variables are byte-for-byte consistent.
+            val appFiles = File("/data/data/${context.packageName}/files")
+            check(appFiles.canonicalFile == context.filesDir.canonicalFile) {
+                "当前应用数据目录与 ARM64 运行时构建路径不匹配；仅支持 Android 主用户的内部存储安装。"
+            }
             return RuntimePaths(
                 appFiles = appFiles,
                 appPackageName = context.packageName,
-                runtimeRoot = runtimeRoot,
-                prefix = File(runtimeRoot, "prefix"),
+                runtimeRoot = File(appFiles, "runtime"),
+                prefix = File(appFiles, "runtime/prefix"),
                 home = File(appFiles, "home"),
                 codexHome = File(appFiles, "codex"),
-                temp = File(runtimeRoot, "tmp")
+                temp = File(appFiles, "runtime/tmp")
             )
         }
     }

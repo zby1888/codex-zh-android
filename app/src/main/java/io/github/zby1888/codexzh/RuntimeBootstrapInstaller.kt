@@ -9,6 +9,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
+import java.util.ArrayDeque
 import java.util.Properties
 import java.util.zip.ZipInputStream
 
@@ -112,7 +113,9 @@ internal class RuntimeBootstrapInstaller(
             }
         }
         check(byteCount == manifest.getLong("archiveSize")) { "运行时资源大小与清单不一致" }
-        val actual = digest.digest().joinToString("") { "%02x".format(it) }
+        val actual = digest.digest().joinToString("") {
+            (it.toInt() and 0xff).toString(16).padStart(2, '0')
+        }
         check(actual == manifest.getString("sha256")) { "运行时资源校验失败，SHA-256 不一致" }
     }
 
