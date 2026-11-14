@@ -75,7 +75,7 @@ jobs:
         run: |
           python3 -m py_compile scripts/validate-private-runtime-bootstrap.py
           mkdir -p runtime/dist
-          cp vendor/termux-packages/bootstrap-aarch64.zip runtime/dist/
+          cp vendor/termux-packages/output/bootstrap-aarch64.zip runtime/dist/
           python3 scripts/validate-private-runtime-bootstrap.py \
             runtime/dist/bootstrap-aarch64.zip \
             --manifest runtime/dist/bootstrap-manifest.json
