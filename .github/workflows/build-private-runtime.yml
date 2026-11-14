@@ -16,7 +16,8 @@ permissions:
 
 jobs:
   build-arm64-bootstrap:
-    runs-on: ubuntu-latest
+    # Pin the host image so Docker and disk layout do not change under ubuntu-latest.
+    runs-on: ubuntu-24.04
     timeout-minutes: 350
     steps:
       - name: Checkout app source
@@ -36,9 +37,31 @@ jobs:
           bash -n vendor/termux-packages/scripts/run-docker.sh
           bash -n vendor/termux-packages/scripts/build-bootstraps.sh
 
+      - name: Free runner disk space and capture diagnostics
+        run: |
+          echo "===== Disk before cleanup ====="
+          df -h
+          echo "===== Memory before cleanup ====="
+          free -h
+          echo "===== Docker version ====="
+          docker version
+          # The builder image installs a complete Android/LLVM toolchain. Remove
+          # unused SDKs and language toolchains preinstalled on the ephemeral host.
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost \
+            /usr/local/share/powershell /usr/local/share/chromium \
+            /usr/share/swift /usr/local/lib/android/sdk
+          docker system prune --all --force --volumes || true
+          echo "===== Disk after cleanup ====="
+          df -h
+
+      - name: Pull pinned Ubuntu builder base image
+        run: docker pull ubuntu:26.04
+
       - name: Build package-builder image from pinned source
         working-directory: vendor/termux-packages/scripts
-        run: docker build --file Dockerfile --tag codex-runtime-builder:${{ github.sha }} .
+        env:
+          DOCKER_BUILDKIT: "1"
+        run: docker build --pull --progress=plain --file Dockerfile --tag codex-runtime-builder:${{ github.sha }} .
 
       - name: Build ARM64 bootstrap from source
         working-directory: vendor/termux-packages
