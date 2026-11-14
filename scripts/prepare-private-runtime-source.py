@@ -82,6 +82,24 @@ def main() -> None:
     # recipe still points at downloads.apache.org, which no longer serves this
     # old tarball after newer APR-util releases are published. Keep the pinned
     # version and checksum; only switch to the official Apache archive.
+    # This private Codex runtime does not need Termux's Android app-launching
+    # utilities. Bash only checks command-not-found as an optional feature,
+    # while termux-tools pulls termux-am/termux-am-socket and an unrelated
+    # Gradle-built APK into the bootstrap dependency graph.
+    bash_recipe_path = source / "packages/bash/build.sh"
+    if not bash_recipe_path.is_file():
+        raise SystemExit(f"Missing pinned Bash recipe: {bash_recipe_path}")
+    bash_recipe = bash_recipe_path.read_text(encoding="utf-8")
+    bash_recipe = replace_once(
+        bash_recipe,
+        'TERMUX_PKG_DEPENDS="libandroid-support, libiconv, readline (>= 8.3), termux-tools"',
+        'TERMUX_PKG_DEPENDS="libandroid-support, libiconv, readline (>= 8.3)"',
+        "omit optional termux-tools from the private Bash dependency chain",
+    )
+    if re.search(r"(?m)^TERMUX_PKG_DEPENDS=.*termux-tools", bash_recipe):
+        raise SystemExit("Private Bash recipe still depends on termux-tools")
+    bash_recipe_path.write_text(bash_recipe, encoding="utf-8")
+
     apr_util_path = source / "packages/apr-util/build.sh"
     if not apr_util_path.is_file():
         raise SystemExit(f"Missing pinned APR-util recipe: {apr_util_path}")

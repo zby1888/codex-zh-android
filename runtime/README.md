@@ -21,6 +21,8 @@
 
 首批目标包：Bash、Coreutils、Git、OpenSSL、CA certificates、libcurl、jq，以及常用文本/文件工具。包均为 Android Bionic/ARM64 构建，不是 glibc Linux rootfs。
 
+为保持运行环境精简，bootstrap 不安装 `termux-tools`、`termux-am` 和 `termux-am-socket`。它们主要提供 Termux 应用启动/系统集成命令；`termux-am` 还会额外触发 Gradle Android APK 构建，而 Codex CLI 本身不依赖这些功能。Bash 配置中的 `command-not-found` 是可选功能，只有对应脚本存在时才会启用。
+
 ## 离线安装
 
 APK 内置 bootstrap ZIP 和 JSON 来源清单。安装器会：

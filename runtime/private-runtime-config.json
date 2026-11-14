@@ -27,9 +27,14 @@
     "termux-exec",
     "codex"
   ],
-  "notes": "Debug and release variants share the exact applicationId com.codex.zhou; the bootstrap is compiled for this package id.",
+  "notes": "Debug and release variants share the exact applicationId com.codex.zhou; the bootstrap is compiled for this package id. The private Codex runtime intentionally excludes termux-tools and its termux-am/termux-am-socket Android app-launching helpers; Bash command-not-found integration is optional and guarded.",
   "codexVersion": "0.169.0",
   "codexPackage": "codex",
   "codexHelper": "codex-code-mode-host",
-  "codexLocalizationPatchCount": 11
+  "codexLocalizationPatchCount": 11,
+  "excludedPackages": [
+    "termux-tools",
+    "termux-am",
+    "termux-am-socket"
+  ]
 }
