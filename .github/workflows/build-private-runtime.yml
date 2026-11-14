@@ -98,8 +98,9 @@ jobs:
           # /data directory: the bootstrap builder must write /data/TERMUX_ARCH
           # inside its container, while the runner's /data is not writable.
           export TERMUX_DOCKER_RUN_EXTRA_ARGS="--volume $HOME/.termux-build:/home/builder/.termux-build"
-          # Keep Rust/C++ compilation conservative to reduce peak runner pressure.
-          ./scripts/run-docker.sh bash -c 'cd /home/builder/termux-packages && export TERMUX_PKG_MAKE_PROCESSES=2 && ./scripts/build-bootstraps.sh --android10 --architectures aarch64'
+          # The 7.7 GiB hosted runner killed rustc while compiling codex-tui.
+          # Build one package at a time and disable Thin LTO to lower peak RAM.
+          ./scripts/run-docker.sh bash -c 'cd /home/builder/termux-packages && export TERMUX_PKG_MAKE_PROCESSES=1 CARGO_PROFILE_RELEASE_LTO=false && ./scripts/build-bootstraps.sh --android10 --architectures aarch64'
 
       - name: Validate bootstrap and write provenance
         run: |
