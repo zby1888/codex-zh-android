@@ -4,7 +4,6 @@ import android.content.Context
 import android.os.Build
 import java.io.File
 import java.util.Properties
-import java.util.concurrent.TimeUnit
 
 internal enum class RuntimePhase(val title: String) {
     UNSUPPORTED_ABI("设备架构不受支持"),
@@ -97,13 +96,32 @@ internal class RuntimeManager(context: Context) {
                 .redirectOutput(outputFile)
             builder.environment().putAll(paths.environment())
             val process = builder.start()
-            if (!process.waitFor(15, TimeUnit.SECONDS)) {
-                process.destroyForcibly()
+
+            // Process.waitFor(timeout, unit) and destroyForcibly() are not
+            // available on every API level supported by this app (minSdk 24).
+            // Wait on a daemon thread and use Thread.join(), which is API-safe.
+            var exitCode: Int? = null
+            var waitFailure: Exception? = null
+            val waiter = Thread {
+                try {
+                    exitCode = process.waitFor()
+                } catch (error: Exception) {
+                    waitFailure = error
+                }
+            }.apply { isDaemon = true }
+            waiter.start()
+            waiter.join(PROCESS_TIMEOUT_MS)
+            if (waiter.isAlive) {
+                process.destroy()
+                waiter.join(PROCESS_TERMINATION_GRACE_MS)
                 throw IllegalStateException("执行 codex --version 超时（15 秒）")
             }
+            waitFailure?.let { throw IllegalStateException("等待 Codex CLI 退出失败", it) }
+
             val output = outputFile.readText(Charsets.UTF_8).trim()
-            check(process.exitValue() == 0) {
-                "codex --version 退出码 ${process.exitValue()}：$output"
+            val code = exitCode ?: throw IllegalStateException("没有取得 Codex CLI 退出状态")
+            check(code == 0) {
+                "codex --version 退出码 $code：$output"
             }
             check(output.contains(EXPECTED_CODEX_VERSION)) {
                 "版本不匹配，期望 $EXPECTED_CODEX_VERSION，实际输出：${output.take(240)}"
@@ -143,5 +161,7 @@ internal class RuntimeManager(context: Context) {
 
     companion object {
         private const val EXPECTED_CODEX_VERSION = "0.169.0"
+        private const val PROCESS_TIMEOUT_MS = 15_000L
+        private const val PROCESS_TERMINATION_GRACE_MS = 1_000L
     }
 }
