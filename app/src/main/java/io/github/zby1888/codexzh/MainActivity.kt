@@ -37,7 +37,7 @@ private fun CodexZhApp() {
                 TopAppBar(title = {
                     Column {
                         Text("Codex 中文版", fontWeight = FontWeight.SemiBold)
-                        Text("Android ARM64 · 私有运行时初始化阶段", style = MaterialTheme.typography.labelSmall)
+                        Text("Android ARM64 · 私有运行时阶段", style = MaterialTheme.typography.labelSmall)
                     }
                 })
             },
@@ -90,12 +90,21 @@ private fun ChatScreen(modifier: Modifier = Modifier) {
 private fun TerminalScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val manager = remember(context) { RuntimeManager(context) }
+    val installer = remember(context) { RuntimeBootstrapInstaller(context, manager) }
     var status by remember { mutableStateOf(manager.inspect()) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(manager) {
         status = withContext(Dispatchers.IO) { manager.inspect() }
+    }
+
+    val actionLabel = when (status.phase) {
+        RuntimePhase.UNSUPPORTED_ABI -> "设备不支持"
+        RuntimePhase.NOT_PREPARED -> "准备私有目录"
+        RuntimePhase.LAYOUT_READY -> "离线安装 ARM64 工具链"
+        RuntimePhase.RUNTIME_READY -> "运行环境已安装"
+        RuntimePhase.ERROR -> "重试安装"
     }
 
     Column(
@@ -113,20 +122,25 @@ private fun TerminalScreen(modifier: Modifier = Modifier) {
                             busy = true
                             try {
                                 status = withContext(Dispatchers.IO) {
-                                    manager.preparePrivateDirectories()
+                                    if (status.phase == RuntimePhase.NOT_PREPARED) {
+                                        manager.preparePrivateDirectories()
+                                    } else {
+                                        installer.install()
+                                    }
                                 }
                             } finally {
                                 busy = false
                             }
                         }
                     },
-                    enabled = !busy && status.phase != RuntimePhase.UNSUPPORTED_ABI,
+                    enabled = !busy && status.phase != RuntimePhase.UNSUPPORTED_ABI &&
+                        status.phase != RuntimePhase.RUNTIME_READY,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     if (busy) CircularProgressIndicator(
                         modifier = Modifier.size(18.dp),
                         strokeWidth = 2.dp
-                    ) else Text("准备 / 检查私有目录")
+                    ) else Text(actionLabel)
                 }
             }
         }
@@ -135,8 +149,12 @@ private fun TerminalScreen(modifier: Modifier = Modifier) {
             "PREFIX：应用私有 files/runtime/prefix\nHOME：应用私有 files/home\nCODEX_HOME：应用私有 files/codex\n不会读取或修改 Termux 的目录。"
         )
         InfoCard(
-            "当前能力边界",
-            "此步骤只验证私有目录布局和 ARM64 ABI。Linux 基础包、Bash、PTY 终端和 Codex CLI 尚未打包，暂时不能执行终端命令。"
+            "运行时说明",
+            "首批工具链包含 Bash、Coreutils、Git、OpenSSL、CA 证书和 jq。它是 Android Bionic/ARM64 用户空间，不是 glibc 桌面 Linux。"
+        )
+        InfoCard(
+            "后续集成",
+            "运行时安装完成后，再接入 PTY 终端、Codex CLI、App Server、Node/Python MCP 执行环境。"
         )
     }
 }

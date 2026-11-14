@@ -6,7 +6,7 @@
 - RuntimePaths：唯一管理应用私有 PREFIX、HOME、CODEX_HOME 和 TMPDIR。
 - RuntimeManager：私有目录初始化、ABI 检查、布局标记与运行时状态检查。
 - RuntimeBootstrapBuilder：CI 从锁定的 Termux package recipes 按本应用 ID 和自定义 prefix 重建 Bionic/ARM64 软件包；不搬运用户现有 Termux 安装。
-- RuntimeInstaller：校验 SHA-256、隔离解包、恢复符号链接、设置执行权限和原子切换（待实现）。
+- RuntimeBootstrapInstaller：校验 APK 内置 SHA-256 清单、隔离解包、恢复安全符号链接、设置执行权限和原子切换。
 - PtySessionManager：PTY 创建、恢复、关闭（待实现）。
 - CodexAppServerClient：JSON-RPC 请求、通知和事件流（待实现）。
 - ChatProviderAdapter：Responses、Chat Completions、Anthropic、Gemini 适配（待实现）。
@@ -16,6 +16,6 @@
 
 目录位于应用私有存储：files/runtime/prefix、files/runtime/tmp、files/home、files/codex。路径创建前会进行规范化边界检查，不提供 Termux 路径回退，也不访问 /data/data/com.termux/files/usr。
 
-当前实现新增了私有目录基础层和 ARM64 运行时源码构建流水线，但**尚未安装 Linux 用户空间**。Bash、Coreutils、Git、PTY、Codex CLI、App Server、通用协议和 MCP 连接器仍未集成。
+当前实现包含私有目录基础层、ARM64 运行时源码构建流水线和 APK 内置 bootstrap 安装器。基础工具链完成构建并在 Android 14 实机验证后，才进入 PTY、Codex CLI、App Server、通用协议和 MCP 连接器集成。
 
 聊天与终端共享应用私有 CODEX_HOME；需处理并发写入与会话恢复。

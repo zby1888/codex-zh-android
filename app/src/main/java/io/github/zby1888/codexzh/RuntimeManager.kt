@@ -8,7 +8,7 @@ internal enum class RuntimePhase(val title: String) {
     UNSUPPORTED_ABI("设备架构不受支持"),
     NOT_PREPARED("私有目录尚未准备"),
     LAYOUT_READY("私有目录已准备"),
-    RUNTIME_READY("ARM64 运行时已安装"),
+    RUNTIME_READY("ARM64 工具链已安装"),
     ERROR("初始化失败")
 }
 
@@ -34,22 +34,33 @@ internal class RuntimeManager(context: Context) {
             paths.home.isDirectory &&
             paths.codexHome.isDirectory
 
-        if (paths.bash.isFile && paths.env.isFile) {
+        if (!layoutExists) {
             return RuntimeStatus(
-                RuntimePhase.RUNTIME_READY,
-                "检测到 Bash 和 env。下一步仍需验证动态库、基础命令和 Codex CLI。"
+                RuntimePhase.NOT_PREPARED,
+                "尚未创建应用私有目录。准备操作只创建目录和布局标记，不下载文件、不运行脚本，也不访问 Termux。"
             )
         }
 
-        return if (layoutExists) {
+        val marker = Properties()
+        if (paths.runtimeMarker.isFile) {
+            runCatching { paths.runtimeMarker.inputStream().buffered().use(marker::load) }
+        }
+
+        val installed = marker.getProperty("runtimeInstalled") == "true" &&
+            marker.getProperty("abi") == "arm64-v8a" &&
+            marker.getProperty("applicationId") == paths.appPackageName &&
+            paths.bash.isFile && paths.env.exists() && paths.git.exists() &&
+            paths.jq.exists() && paths.execPreload.isFile
+
+        return if (installed) {
             RuntimeStatus(
-                RuntimePhase.LAYOUT_READY,
-                "应用私有目录已建立；ARM64 Linux 用户空间尚未安装，因此终端暂不可执行命令。"
+                RuntimePhase.RUNTIME_READY,
+                "Bash、Coreutils、Git、jq 和命令路径兼容层已就绪。当前为 Android Bionic/ARM64 用户空间，不是 glibc 桌面 Linux。"
             )
         } else {
             RuntimeStatus(
-                RuntimePhase.NOT_PREPARED,
-                "尚未创建应用私有运行目录。准备操作只创建目录和布局标记，不下载文件、不运行脚本，也不访问 Termux。"
+                RuntimePhase.LAYOUT_READY,
+                "应用私有目录已建立。下一步从 APK 内置资源离线安装 ARM64 工具链；不会访问 Termux。"
             )
         }
     }
