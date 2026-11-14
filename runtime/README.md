@@ -2,7 +2,11 @@
 
 ## 当前设备阶段
 
-用户已在 Android 14 / ARM64 设备上成功创建应用私有目录：
+<badge>实机验证通过</badge>
+
+截至 2026-11-14，用户已在 Android 14 / ARM64 设备上确认：安装 APK 后，应用内置的 ARM64 bootstrap 可以成功安装到应用私有目录。验证范围是基础 Bionic/ARM64 运行环境的离线安装，不代表 Codex CLI、PTY、App Server 聊天或 MCP 已经可用。
+
+应用私有目录：
 
 - `files/runtime/prefix`：ARM64 用户空间前缀。
 - `files/runtime/tmp`：运行时临时目录。

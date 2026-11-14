@@ -2,7 +2,7 @@
 
 独立 Android ARM64 Codex 中文客户端工程。目标是将 Codex 智能体、终端、通用聊天、模型服务商和 MCP 工具整合到一个不依赖 Termux 的应用中。
 
-> **当前状态：工程骨架与私有运行时构建阶段。** 当前包含可编译的 Jetpack Compose UI、产品/架构文档和 CI。ARM64 私有运行时正在通过 GitHub Actions 从锁定源码构建；PTY 终端、Codex App Server、通用模型协议适配器和 MCP 执行器仍需后续集成，因此目前还不是完整可用客户端。
+> **当前状态：基础 ARM64 私有运行环境已构建，并已在 Android 14 / ARM64 实机验证安装成功。** APK 已内置离线 bootstrap，应用可以在自己的私有目录中安装基础 Bionic 工具链；这不代表完整 Codex 客户端已经完成。真正的 PTY 终端、Codex CLI 启动、Codex App Server 聊天、通用模型协议适配器和 MCP 执行器仍需继续集成。
 
 - 应用名：Codex 中文版
 - Android applicationId：`com.codex.zhou`

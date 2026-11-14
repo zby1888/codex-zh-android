@@ -16,6 +16,17 @@
 
 目录位于应用私有存储：files/runtime/prefix、files/runtime/tmp、files/home、files/codex。路径创建前会进行规范化边界检查，不提供 Termux 路径回退，也不访问 /data/data/com.termux/files/usr。
 
-当前实现包含私有目录基础层、ARM64 运行时源码构建流水线和 APK 内置 bootstrap 安装器。基础工具链完成构建并在 Android 14 实机验证后，才进入 PTY、Codex CLI、App Server、通用协议和 MCP 连接器集成。
+当前实现包含私有目录基础层、ARM64 运行时源码构建流水线和 APK 内置 bootstrap 安装器；基础工具链已在 Android 14 / ARM64 实机完成安装验证。接下来进入 PTY、Codex CLI、App Server、通用协议和 MCP 连接器集成。
+
+## 开源项目参考与边界
+
+本项目以 Codex CLI / Codex App Server 作为智能体执行核心，参考其他开源 Android AI 客户端的产品设计，不把其他项目的协议或运行时直接替换成 Codex：
+
+- **RikkaHub**：参考模型服务商管理、自定义 API 地址/模型/请求头、配置持久化和 MCP 入口的组织方式。
+- **Operit**：参考智能体工作区、工具调用进度、工具结果卡片、逐工具审批以及 MCP / Skills 的交互方式。
+- **OpenCode**：参考会话生命周期、事件流归并、工具调用状态和终端/PTY 的体验；会话与执行协议仍以 Codex App Server 为准。
+- **Termux**：参考 Android/Bionic 私有运行环境、PTY 和终端模拟器的集成方式；不复用用户现有 Termux 的私有目录。
+
+只借鉴经过核对的功能与架构思路。移植任何源码、资源或文案前，必须单独检查上游许可证和依赖许可证；不能因为项目开源就默认可以直接复制。
 
 聊天与终端共享应用私有 CODEX_HOME；需处理并发写入与会话恢复。
