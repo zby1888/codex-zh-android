@@ -23,6 +23,24 @@ def main() -> None:
         raise SystemExit("usage: prepare-private-runtime-source.py <termux-packages-checkout>")
 
     source = Path(sys.argv[1]).resolve()
+    # APR-util 1.6.5 is an archived Apache release. The pinned Termux
+    # recipe still points at downloads.apache.org, which no longer serves this
+    # old tarball after newer APR-util releases are published. Keep the pinned
+    # version and checksum; only switch to the official Apache archive.
+    apr_util_path = source / "packages/apr-util/build.sh"
+    if not apr_util_path.is_file():
+        raise SystemExit(f"Missing pinned APR-util recipe: {apr_util_path}")
+    apr_util = apr_util_path.read_text(encoding="utf-8")
+    apr_util = replace_once(
+        apr_util,
+        'TERMUX_PKG_SRCURL="https://downloads.apache.org/apr/apr-util-${TERMUX_PKG_VERSION}.tar.gz"',
+        'TERMUX_PKG_SRCURL="https://archive.apache.org/dist/apr/apr-util-${TERMUX_PKG_VERSION}.tar.gz"',
+        "use official Apache archive for APR-util 1.6.5",
+    )
+    if "TERMUX_PKG_SHA256=f43a1c8c79eef497a022ec6c99dddbdf57e42001da6ccbfae259631ed5aa2805" not in apr_util:
+        raise SystemExit("Pinned APR-util SHA-256 changed unexpectedly; review the recipe before building")
+    apr_util_path.write_text(apr_util, encoding="utf-8")
+
     properties_path = source / "scripts/properties.sh"
     bootstrap_path = source / "scripts/build-bootstraps.sh"
     docker_runner_path = source / "scripts/run-docker.sh"
