@@ -14,6 +14,11 @@ on:
 permissions:
   contents: read
 
+# Keep expensive ARM64 bootstrap builds serialized; a newer commit supersedes an older build.
+concurrency:
+  group: private-runtime-arm64-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-arm64-bootstrap:
     # Pin the host image so Docker and disk layout do not change under ubuntu-latest.
@@ -61,6 +66,16 @@ jobs:
           echo "===== Disk after cleanup ====="
           df -h
 
+      # run-docker.sh mounts this host directory into /home/builder/.termux-build.
+      # Reusing it preserves downloaded sources, Rust/Cargo data and completed package builds.
+      - name: Restore Termux ARM64 build cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.termux-build
+          key: termux-private-runtime-ubuntu24-aarch64-${{ hashFiles('runtime/sources.lock.yml', 'runtime/private-runtime-config.json', 'scripts/prepare-private-runtime-source.py', 'vendor/codex-zh-cn/native/patches/codex/*.patch') }}
+          restore-keys: |
+            termux-private-runtime-ubuntu24-aarch64-
+
       - name: Pull pinned Ubuntu builder base image
         run: docker pull ubuntu:26.04
 
@@ -76,7 +91,9 @@ jobs:
           TERMUX_BUILDER_IMAGE_NAME: codex-runtime-builder:${{ github.sha }}
           CONTAINER_NAME: codex-runtime-builder-${{ github.run_id }}
         run: |
-          ./scripts/run-docker.sh ./scripts/build-bootstraps.sh --android10 --architectures aarch64
+          # Use the same conservative parallelism as the native CLI workflow.
+          # Mount the host build cache so a retry can reuse completed packages.
+          ./scripts/run-docker.sh --mount-termux-dirs bash -c 'cd /home/builder/termux-packages && export TERMUX_PKG_MAKE_PROCESSES=2 && ./scripts/build-bootstraps.sh --android10 --architectures aarch64'
 
       - name: Validate bootstrap and write provenance
         run: |
