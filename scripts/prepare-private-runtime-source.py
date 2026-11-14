@@ -97,7 +97,8 @@ def main() -> None:
         + "\n"
     )
     bootstrap = bootstrap[:start] + replacement + bootstrap[end:]
-    # Write the generated archive into output/, which is already writable for\n    # package artifacts under the Termux builder's restricted container profile.\n    bootstrap = replace_once(\n        bootstrap,\n        'mv -f "${BOOTSTRAP_TMPDIR}/bootstrap-${1}.zip" "$TERMUX_PACKAGES_DIRECTORY/"',\n        'mv -f "${BOOTSTRAP_TMPDIR}/bootstrap-${1}.zip" "$TERMUX_BUILT_DEBS_DIRECTORY/" || return $?',\n        "write bootstrap archive into the writable package output directory",\n    )\n    bootstrap_path.write_text(bootstrap, encoding="utf-8")
+    # Write the generated archive into output/, which is already writable for
+    # package artifacts under the Termux builder's restricted container profile.\n    bootstrap = replace_once(\n        bootstrap,\n        'mv -f "${BOOTSTRAP_TMPDIR}/bootstrap-${1}.zip" "$TERMUX_PACKAGES_DIRECTORY/"',\n        'mv -f "${BOOTSTRAP_TMPDIR}/bootstrap-${1}.zip" "$TERMUX_BUILT_DEBS_DIRECTORY/" || return $?',\n        "write bootstrap archive into the writable package output directory",\n    )\n    bootstrap_path.write_text(bootstrap, encoding="utf-8")
 
     # GitHub-hosted runners do not always expose AppArmor. Keep the upstream
     # seccomp profile and CAP_SYS_ADMIN/FUSE settings, but omit only the
