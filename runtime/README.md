@@ -11,9 +11,9 @@
 
 ## 构建策略
 
-不直接解压其他 Termux 安装中的软件包。Termux 软件包中的路径通常在构建时写入，不能简单移动到另一个前缀。我们使用仓库锁定的 `termux/termux-packages` commit，在 CI 中按本应用 Debug applicationId 和自定义前缀重新构建 ARM64/Bionic 软件包。
+不直接解压其他 Termux 安装中的软件包。Termux 软件包中的路径通常在构建时写入，不能简单移动到另一个前缀。我们使用仓库锁定的 `termux/termux-packages` commit，在 CI 中按本应用 applicationId 和自定义前缀重新构建 ARM64/Bionic 软件包。
 
-运行时构建配置见 `private-runtime-config.json`。当前 Debug applicationId 为 `io.github.zby1888.codexzh.debug`，构建时的 PREFIX 与应用的 `files/runtime/prefix` 完全一致。正式 Release 版本必须单独按 `io.github.zby1888.codexzh` 重新构建运行时，不能混用 Debug bootstrap。
+运行时构建配置见 `private-runtime-config.json`。Debug 和 Release 使用完全相同的 applicationId：`com.codex.zhou`。因此两种构建使用相同的私有运行时路径与 bootstrap，不再需要为 Debug/Release 分别编译不同包名的运行时。
 
 首批目标包：Bash、Coreutils、Git、OpenSSL、CA certificates、libcurl、jq，以及常用文本/文件工具。包均为 Android Bionic/ARM64 构建，不是 glibc Linux rootfs。
 

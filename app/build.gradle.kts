@@ -7,7 +7,7 @@ android {
     namespace = "io.github.zby1888.codexzh"
     compileSdk = 35
     defaultConfig {
-        applicationId = "io.github.zby1888.codexzh"
+        applicationId = "com.codex.zhou"
         minSdk = 24
         targetSdk = 35
         versionCode = 1
@@ -15,7 +15,10 @@ android {
         ndk { abiFilters += listOf("arm64-v8a") }
     }
     buildTypes {
-        debug { applicationIdSuffix = ".debug"; versionNameSuffix = "-debug" }
+        // Keep the requested Android applicationId exact for debug and release.
+        // Only the version name differs; the debug APK can coexist with the old
+        // io.github.zby1888.codexzh.debug scaffold because its applicationId changes.
+        debug { versionNameSuffix = "-debug" }
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
