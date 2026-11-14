@@ -43,7 +43,9 @@ internal class RuntimeManager(context: Context) {
 
         val marker = Properties()
         if (paths.runtimeMarker.isFile) {
-            runCatching { paths.runtimeMarker.inputStream().buffered().use(marker::load) }
+            runCatching {
+                paths.runtimeMarker.inputStream().buffered().use { marker.load(it) }
+            }
         }
 
         val installed = marker.getProperty("runtimeInstalled") == "true" &&

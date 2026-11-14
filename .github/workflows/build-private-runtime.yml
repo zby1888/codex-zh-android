@@ -63,3 +63,44 @@ jobs:
           path: runtime/dist/*
           if-no-files-found: error
           retention-days: 14
+
+  assemble-debug-with-runtime:
+    needs: build-arm64-bootstrap
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout app source
+        uses: actions/checkout@v4
+
+      - name: Download validated ARM64 bootstrap
+        uses: actions/download-artifact@v4
+        with:
+          name: codex-zh-private-runtime-arm64
+          path: runtime/dist
+
+      - name: Embed bootstrap into APK assets
+        run: |
+          mkdir -p app/src/main/assets/runtime
+          cp runtime/dist/bootstrap-aarch64.zip app/src/main/assets/runtime/
+          cp runtime/dist/bootstrap-manifest.json app/src/main/assets/runtime/
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Assemble debug APK with private runtime
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Upload debug APK with private runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-zh-android-debug-with-runtime
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14

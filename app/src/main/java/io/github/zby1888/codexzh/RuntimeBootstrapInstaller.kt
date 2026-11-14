@@ -7,7 +7,6 @@ import android.system.OsConstants
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.util.Properties
@@ -42,7 +41,7 @@ internal class RuntimeBootstrapInstaller(
             ensureDirectory(staging)
 
             val symlinkText = extractArchive(staging)
-            restoreSymlinks(staging, symlinkText, manifest)
+            restoreSymlinks(staging, symlinkText)
 
             if (paths.prefix.exists()) {
                 if (!paths.prefix.renameTo(oldPrefix)) {
@@ -59,7 +58,7 @@ internal class RuntimeBootstrapInstaller(
 
             verifyInstalledFiles()
             writeRuntimeMarker(manifest)
-            backup?.let(::deleteTreeNoFollow)
+            backup?.let { old -> runCatching { deleteTreeNoFollow(old) } }
             backup = null
 
             manager.inspect()
@@ -102,14 +101,17 @@ internal class RuntimeBootstrapInstaller(
 
     private fun verifyAssetHash(manifest: JSONObject) {
         val digest = MessageDigest.getInstance("SHA-256")
+        var byteCount = 0L
         context.assets.open(ARCHIVE_ASSET).use { input ->
             val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
             while (true) {
                 val count = input.read(buffer)
                 if (count < 0) break
+                byteCount += count
                 digest.update(buffer, 0, count)
             }
         }
+        check(byteCount == manifest.getLong("archiveSize")) { "运行时资源大小与清单不一致" }
         val actual = digest.digest().joinToString("") { "%02x".format(it) }
         check(actual == manifest.getString("sha256")) { "运行时资源校验失败，SHA-256 不一致" }
     }
@@ -188,7 +190,7 @@ internal class RuntimeBootstrapInstaller(
         return output.toByteArray()
     }
 
-    private fun restoreSymlinks(staging: File, contents: String, manifest: JSONObject) {
+    private fun restoreSymlinks(staging: File, contents: String) {
         val expectedPrefix = "/data/data/${context.packageName}/files/runtime/prefix"
         val seen = HashSet<String>()
 
@@ -214,11 +216,12 @@ internal class RuntimeBootstrapInstaller(
     private fun validateSymlinkTarget(link: String, target: String, expectedPrefix: String) {
         check(target.isNotBlank() && !target.contains('\u0000')) { "符号链接目标无效：$link" }
         if (target.startsWith("/")) {
-            val allowedSystemPath = listOf("/system/", "/apex/", "/vendor/", "/product/", "/odm/")
-                .any(target::startsWith)
+            val allowedSystemPath = listOf(
+                "/system/", "/apex/", "/vendor/", "/product/", "/odm/", "/proc/", "/dev/"
+            ).any(target::startsWith)
             check(
                 target == expectedPrefix || target.startsWith("$expectedPrefix/") || allowedSystemPath
-            ) { "符号链接试图访问应用私有目录以外的位置：$link" }
+            ) { "符号链接试图访问应用私有前缀以外的位置：$link" }
         } else {
             val stack = ArrayDeque<String>()
             val base = link.substringBeforeLast('/', "")
@@ -236,9 +239,7 @@ internal class RuntimeBootstrapInstaller(
     }
 
     private fun verifyInstalledFiles() {
-        val required = listOf(
-            paths.bash, paths.env, paths.git, paths.jq, paths.execPreload
-        )
+        val required = listOf(paths.bash, paths.env, paths.git, paths.jq, paths.execPreload)
         val missing = required.filterNot { it.exists() }
         check(missing.isEmpty()) {
             "运行时关键文件缺失：${missing.joinToString { it.relativeTo(paths.prefix).path }}"
@@ -256,12 +257,7 @@ internal class RuntimeBootstrapInstaller(
         }
         val temporary = File(paths.runtimeRoot, ".runtime.properties.tmp")
         temporary.outputStream().buffered().use { properties.store(it, "Codex Zh Android runtime") }
-        if (paths.runtimeMarker.exists() && !paths.runtimeMarker.delete()) {
-            throw IllegalStateException("无法更新运行时状态文件")
-        }
-        if (!temporary.renameTo(paths.runtimeMarker)) {
-            throw IllegalStateException("无法保存运行时状态文件")
-        }
+        Os.rename(temporary.absolutePath, paths.runtimeMarker.absolutePath)
     }
 
     private fun normalizeArchivePath(raw: String): String {
