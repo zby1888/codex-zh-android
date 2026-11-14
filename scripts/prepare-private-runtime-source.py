@@ -99,8 +99,7 @@ def main() -> None:
     block = block.replace(
         '\tAPPARMOR_PARSER=""\n',
         '\tAPPARMOR_PARSER=""\n'
-        '\tSEC_OPT="$(printf \'%s\' "$SEC_OPT" | sed -E \'s/ --security-opt apparmor=[^ ]+//\')"
-',
+        '\tSEC_OPT="$(printf \'%s\' "$SEC_OPT" | sed -E \'s/ --security-opt apparmor=[^ ]+//\')"\n',
     )
     docker_runner = docker_runner[:matches[0].start()] + block + docker_runner[matches[0].end():]
     docker_runner_path.write_text(docker_runner, encoding="utf-8")

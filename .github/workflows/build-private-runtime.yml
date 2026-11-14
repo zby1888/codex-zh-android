@@ -30,14 +30,11 @@ jobs:
 
       - name: Configure custom application prefix
         run: |
-          python3 -m py_compile scripts/prepare-private-runtime-source.py
           python3 scripts/prepare-private-runtime-source.py vendor/termux-packages
-          bash -n vendor/termux-packages/scripts/run-docker.sh
-          bash -n vendor/termux-packages/scripts/build-bootstraps.sh
 
-      - name: Build package-builder image from pinned source
-        working-directory: vendor/termux-packages/scripts
-        run: docker build --file Dockerfile --tag codex-runtime-builder:${{ github.sha }} .
+      - name: Build pinned Android package-builder image
+        working-directory: vendor/termux-packages
+        run: docker build --file scripts/Dockerfile --tag codex-runtime-builder:${GITHUB_SHA} .
 
       - name: Build ARM64 bootstrap from source
         working-directory: vendor/termux-packages
@@ -49,7 +46,6 @@ jobs:
 
       - name: Validate bootstrap and write provenance
         run: |
-          python3 -m py_compile scripts/validate-private-runtime-bootstrap.py
           mkdir -p runtime/dist
           cp vendor/termux-packages/bootstrap-aarch64.zip runtime/dist/
           python3 scripts/validate-private-runtime-bootstrap.py \
