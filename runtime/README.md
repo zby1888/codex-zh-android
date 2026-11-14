@@ -1,7 +1,15 @@
-# ARM64 Runtime（待实现）
+# ARM64 Runtime 私有目录基础层
 
-目标是在应用私有目录初始化 ARM64 Linux 用户空间，不复用 Termux APK 的固定路径，也不要求安装 Termux。
+当前阶段已实现 Android 应用私有目录布局管理：
 
-计划组件：Bash、Coreutils、Git、OpenSSL、CA 证书、libc++、tar、gzip、grep、sed；按需提供 Node.js、Python/uv 以运行常见本地 MCP 服务。
+- files/runtime/prefix：未来 ARM64 用户空间前缀。
+- files/runtime/tmp：运行时临时目录。
+- files/home：独立 HOME。
+- files/codex：独立 CODEX_HOME。
+- 启动时检查设备 ABI；只接受 arm64-v8a。
+- 初始化前检查规范化路径，拒绝逃逸出应用私有目录。
+- 生成不含密钥的布局标记，供后续版本检查。
 
-**当前尚未构建或打包 Runtime。** 来源锁定检查不等于 Runtime 构建。后续还需完成私有 PREFIX 重定位、依赖闭包、编译、许可证归档、哈希校验和 Android 14 实机测试。
+**重要：这不是已安装的 Linux Runtime。** 当前不会下载或解包软件包，不会执行 shell 命令，也不会访问 Termux。只有后续打包 Bash、Coreutils、动态库和 Codex CLI，并通过 Android 14 实机验证后，终端才会真正可用。
+
+下一步：确定可重定位的 Android ARM64 软件包来源，构建依赖闭包和许可证清单，再实现安全解包、哈希校验与启动器。

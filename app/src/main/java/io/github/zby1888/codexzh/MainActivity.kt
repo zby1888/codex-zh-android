@@ -9,8 +9,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -33,7 +37,7 @@ private fun CodexZhApp() {
                 TopAppBar(title = {
                     Column {
                         Text("Codex 中文版", fontWeight = FontWeight.SemiBold)
-                        Text("Android ARM64 · 工程骨架", style = MaterialTheme.typography.labelSmall)
+                        Text("Android ARM64 · 私有运行时初始化阶段", style = MaterialTheme.typography.labelSmall)
                     }
                 })
             },
@@ -52,8 +56,7 @@ private fun CodexZhApp() {
         ) { padding ->
             when (tab) {
                 Tab.Chat -> ChatScreen(Modifier.padding(padding))
-                Tab.Terminal -> InfoScreen(Modifier.padding(padding), "独立终端",
-                    "目标是在应用私有目录运行 ARM64 Linux Runtime，不依赖 Termux。PTY 与终端模拟器尚未接入。")
+                Tab.Terminal -> TerminalScreen(Modifier.padding(padding))
                 Tab.Providers -> ListScreen(Modifier.padding(padding), "模型服务商",
                     "配置第三方中转站 API、模型 ID、API 基础地址和自定义请求头。",
                     listOf("OpenAI Responses 兼容", "OpenAI Chat Completions 兼容", "Anthropic Messages", "Google Gemini", "自定义 API"))
@@ -84,9 +87,57 @@ private fun ChatScreen(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun InfoScreen(modifier: Modifier, title: String, body: String) {
-    Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        InfoCard(title, body)
+private fun TerminalScreen(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val manager = remember(context) { RuntimeManager(context) }
+    var status by remember { mutableStateOf(manager.inspect()) }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(manager) {
+        status = withContext(Dispatchers.IO) { manager.inspect() }
+    }
+
+    Column(
+        modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Card {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("独立 ARM64 运行环境", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(status.phase.title, style = MaterialTheme.typography.titleSmall)
+                Text(status.message, style = MaterialTheme.typography.bodyMedium)
+                Button(
+                    onClick = {
+                        scope.launch {
+                            busy = true
+                            try {
+                                status = withContext(Dispatchers.IO) {
+                                    manager.preparePrivateDirectories()
+                                }
+                            } finally {
+                                busy = false
+                            }
+                        }
+                    },
+                    enabled = !busy && status.phase != RuntimePhase.UNSUPPORTED_ABI,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (busy) CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp
+                    ) else Text("准备 / 检查私有目录")
+                }
+            }
+        }
+        InfoCard(
+            "目录隔离",
+            "PREFIX：应用私有 files/runtime/prefix\nHOME：应用私有 files/home\nCODEX_HOME：应用私有 files/codex\n不会读取或修改 Termux 的目录。"
+        )
+        InfoCard(
+            "当前能力边界",
+            "此步骤只验证私有目录布局和 ARM64 ABI。Linux 基础包、Bash、PTY 终端和 Codex CLI 尚未打包，暂时不能执行终端命令。"
+        )
     }
 }
 
