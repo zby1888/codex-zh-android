@@ -8,3 +8,7 @@ sources:
     repository: https://github.com/termux/termux-packages
     ref: 1d8cc3f98c8a685f3a1475becbb0fe7d7dcda7fd
     purpose: Reference recipes for Android package builds
+  - name: codex-zh-localization
+    repository: https://github.com/zby1888/codex-code-zh-cn
+    ref: 65a3e421cc67d9859b3eaecf26f859a806a9dded
+    purpose: 11 reviewed native Chinese patches for Codex 0.169.0

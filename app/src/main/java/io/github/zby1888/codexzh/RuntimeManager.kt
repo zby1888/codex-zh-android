@@ -2,13 +2,15 @@ package io.github.zby1888.codexzh
 
 import android.content.Context
 import android.os.Build
+import java.io.File
 import java.util.Properties
+import java.util.concurrent.TimeUnit
 
 internal enum class RuntimePhase(val title: String) {
     UNSUPPORTED_ABI("设备架构不受支持"),
     NOT_PREPARED("私有目录尚未准备"),
     LAYOUT_READY("私有目录已准备"),
-    RUNTIME_READY("ARM64 工具链已安装"),
+    RUNTIME_READY("Codex CLI 已可启动"),
     ERROR("初始化失败")
 }
 
@@ -48,22 +50,69 @@ internal class RuntimeManager(context: Context) {
             }
         }
 
-        val installed = marker.getProperty("runtimeInstalled") == "true" &&
+        val baseRuntimeInstalled = marker.getProperty("runtimeInstalled") == "true" &&
             marker.getProperty("abi") == "arm64-v8a" &&
             marker.getProperty("applicationId") == paths.appPackageName &&
             paths.bash.isFile && paths.env.exists() && paths.git.exists() &&
             paths.jq.exists() && paths.execPreload.isFile
 
-        return if (installed) {
-            RuntimeStatus(
-                RuntimePhase.RUNTIME_READY,
-                "Bash、Coreutils、Git、jq 和命令路径兼容层已就绪。当前为 Android Bionic/ARM64 用户空间，不是 glibc 桌面 Linux。"
-            )
-        } else {
-            RuntimeStatus(
+        if (!baseRuntimeInstalled) {
+            return RuntimeStatus(
                 RuntimePhase.LAYOUT_READY,
                 "应用私有目录已建立。下一步从 APK 内置资源离线安装 ARM64 工具链；不会访问 Termux。"
             )
+        }
+
+        val codex = File(paths.prefix, "bin/codex")
+        val helper = File(paths.prefix, "bin/codex-code-mode-host")
+        if (!codex.isFile || !codex.canExecute() || !helper.isFile || !helper.canExecute()) {
+            return RuntimeStatus(
+                RuntimePhase.ERROR,
+                "基础 ARM64 工具链已安装，但本次运行环境缺少 Codex CLI 或 codex-code-mode-host。请点击下方按钮更新运行环境。"
+            )
+        }
+
+        return try {
+            val output = runCodexVersion(codex, helper)
+            RuntimeStatus(
+                RuntimePhase.RUNTIME_READY,
+                "已在应用私有环境中实际执行 codex --version：$output\nCodex CLI 和辅助程序均已通过启动检查。"
+            )
+        } catch (error: Exception) {
+            RuntimeStatus(
+                RuntimePhase.ERROR,
+                "基础 ARM64 工具链已安装，但 codex --version 检查未通过：${error.message ?: "未知错误"}\n可以重新安装内置运行环境后再检查。"
+            )
+        }
+    }
+
+    private fun runCodexVersion(codex: File, helper: File): String {
+        check(codex.isFile && codex.canExecute()) { "codex 文件不存在或没有执行权限" }
+        check(helper.isFile && helper.canExecute()) { "codex-code-mode-host 文件不存在或没有执行权限" }
+        val outputFile = File.createTempFile("codex-version-", ".txt", paths.temp)
+        try {
+            val builder = ProcessBuilder(codex.absolutePath, "--version")
+                .directory(paths.home)
+                .redirectErrorStream(true)
+                .redirectOutput(outputFile)
+            builder.environment().putAll(paths.environment())
+            val process = builder.start()
+            if (!process.waitFor(15, TimeUnit.SECONDS)) {
+                process.destroyForcibly()
+                throw IllegalStateException("执行 codex --version 超时（15 秒）")
+            }
+            val output = outputFile.readText(Charsets.UTF_8).trim()
+            check(process.exitValue() == 0) {
+                "codex --version 退出码 ${process.exitValue()}：$output"
+            }
+            check(output.contains(EXPECTED_CODEX_VERSION)) {
+                "版本不匹配，期望 $EXPECTED_CODEX_VERSION，实际输出：${output.take(240)}"
+            }
+            return output.lineSequence().firstOrNull().orEmpty().ifBlank {
+                "codex $EXPECTED_CODEX_VERSION"
+            }
+        } finally {
+            outputFile.delete()
         }
     }
 
@@ -91,4 +140,8 @@ internal class RuntimeManager(context: Context) {
 
     private fun supportsArm64(): Boolean =
         Build.SUPPORTED_ABIS.any { it.equals("arm64-v8a", ignoreCase = true) }
+
+    companion object {
+        private const val EXPECTED_CODEX_VERSION = "0.169.0"
+    }
 }

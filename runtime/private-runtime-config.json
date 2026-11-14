@@ -24,7 +24,12 @@
     "ca-certificates",
     "libcurl",
     "jq",
-    "termux-exec"
+    "termux-exec",
+    "codex"
   ],
-  "notes": "Debug and release variants share the exact applicationId com.codex.zhou; the bootstrap is compiled for this package id."
+  "notes": "Debug and release variants share the exact applicationId com.codex.zhou; the bootstrap is compiled for this package id.",
+  "codexVersion": "0.169.0",
+  "codexPackage": "codex",
+  "codexHelper": "codex-code-mode-host",
+  "codexLocalizationPatchCount": 11
 }

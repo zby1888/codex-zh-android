@@ -91,12 +91,16 @@ private fun TerminalScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val manager = remember(context) { RuntimeManager(context) }
     val installer = remember(context) { RuntimeBootstrapInstaller(context, manager) }
-    var status by remember { mutableStateOf(manager.inspect()) }
-    var busy by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf(RuntimeStatus(RuntimePhase.NOT_PREPARED, "正在检查应用私有运行环境…")) }
+    var busy by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(manager) {
-        status = withContext(Dispatchers.IO) { manager.inspect() }
+        try {
+            status = withContext(Dispatchers.IO) { manager.inspect() }
+        } finally {
+            busy = false
+        }
     }
 
     val actionLabel = when (status.phase) {

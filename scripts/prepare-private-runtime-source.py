@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -18,11 +20,64 @@ def replace_once(content: str, old: str, new: str, label: str) -> str:
     return content.replace(old, new, 1)
 
 
+def locked_ref(name: str) -> str:
+    lock = (ROOT / "runtime/sources.lock.yml").read_text(encoding="utf-8")
+    entries = re.findall(r"(?ms)^  - name: ([^\n]+)\n(.*?)(?=^  - name: |\Z)", lock)
+    for source_name, body in entries:
+        if source_name.strip() == name:
+            match = re.search(r"(?m)^    ref: ([^\n]+)$", body)
+            if match:
+                return match.group(1).strip().strip("'\"")
+    raise SystemExit(f"Missing pinned source ref in sources.lock.yml: {name}")
+
+
+def stage_codex_localization(termux_source: Path, localization_source: Path) -> None:
+    package_dir = termux_source / "packages/codex"
+    recipe_path = package_dir / "build.sh"
+    if not recipe_path.is_file():
+        raise SystemExit(f"Missing pinned Termux Codex package recipe: {recipe_path}")
+    recipe = recipe_path.read_text(encoding="utf-8")
+    expected_version = CONFIG["codexVersion"]
+    if f'TERMUX_PKG_VERSION="{expected_version}"' not in recipe:
+        raise SystemExit(f"Termux Codex recipe does not match Codex {expected_version}")
+    for required in ('-p codex-cli', '--bin codex', '-p codex-code-mode-host', '--bin codex-code-mode-host'):
+        if required not in recipe:
+            raise SystemExit(f"Termux Codex recipe missing target: {required}")
+
+    expected_ref = locked_ref("codex-zh-localization")
+    actual_ref = subprocess.run(
+        ["git", "-C", str(localization_source), "rev-parse", "HEAD"],
+        check=True, capture_output=True, text=True
+    ).stdout.strip()
+    if actual_ref != expected_ref:
+        raise SystemExit(f"Localization checkout mismatch: expected {expected_ref}, got {actual_ref}")
+
+    patch_dir = localization_source / "native/patches/codex"
+    patches = sorted(patch_dir.glob("*.patch"))
+    expected_count = int(CONFIG["codexLocalizationPatchCount"])
+    if len(patches) != expected_count:
+        raise SystemExit(f"Expected {expected_count} localization patches, found {len(patches)}")
+    for index, patch in enumerate(patches, start=1):
+        if not re.match(rf"^{index:04d}-.*\.patch$", patch.name):
+            raise SystemExit(f"Unexpected localization patch order/name: {patch.name}")
+        content = patch.read_text(encoding="utf-8")
+        if "--- a/codex-rs/" not in content or "+++ b/codex-rs/" not in content:
+            raise SystemExit(f"Patch does not target Codex source: {patch.name}")
+
+    for stale in package_dir.glob("zzz-codex-zh-*.patch"):
+        stale.unlink()
+    for patch in patches:
+        shutil.copyfile(patch, package_dir / f"zzz-codex-zh-{patch.name}")
+    print(f"Pinned Chinese localization revision: {actual_ref}")
+    print(f"Staged {len(patches)} native Chinese patches into {package_dir}")
+
+
 def main() -> None:
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: prepare-private-runtime-source.py <termux-packages-checkout>")
+    if len(sys.argv) != 3:
+        raise SystemExit("usage: prepare-private-runtime-source.py <termux-packages-checkout> <codex-localization-checkout>")
 
     source = Path(sys.argv[1]).resolve()
+    localization_source = Path(sys.argv[2]).resolve()
     # APR-util 1.6.5 is an archived Apache release. The pinned Termux
     # recipe still points at downloads.apache.org, which no longer serves this
     # old tarball after newer APR-util releases are published. Keep the pinned
@@ -40,6 +95,8 @@ def main() -> None:
     if "TERMUX_PKG_SHA256=f43a1c8c79eef497a022ec6c99dddbdf57e42001da6ccbfae259631ed5aa2805" not in apr_util:
         raise SystemExit("Pinned APR-util SHA-256 changed unexpectedly; review the recipe before building")
     apr_util_path.write_text(apr_util, encoding="utf-8")
+
+    stage_codex_localization(source, localization_source)
 
     properties_path = source / "scripts/properties.sh"
     bootstrap_path = source / "scripts/build-bootstraps.sh"

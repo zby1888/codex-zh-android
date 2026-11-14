@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import posixpath
+import re
 import zipfile
 from pathlib import Path
 
@@ -40,6 +41,28 @@ def validate_symlink_target(link: str, target: str) -> None:
             raise ValueError(f"Relative symlink target escapes prefix: {link} -> {target}")
 
 
+def locked_ref(name: str) -> str:
+    lock = (ROOT / "runtime/sources.lock.yml").read_text(encoding="utf-8")
+    entries = re.findall(r"(?ms)^  - name: ([^\n]+)\n(.*?)(?=^  - name: |\Z)", lock)
+    for source_name, body in entries:
+        if source_name.strip() == name:
+            match = re.search(r"(?m)^    ref: ([^\n]+)$", body)
+            if match:
+                return match.group(1).strip().strip("'\"")
+    raise SystemExit(f"Missing pinned source ref in sources.lock.yml: {name}")
+
+
+def validate_aarch64_elf(archive: zipfile.ZipFile, path: str) -> None:
+    data = archive.read(path)
+    if len(data) < 20 or data[:4] != b"\x7fELF":
+        raise SystemExit(f"{path} is not an ELF executable")
+    if data[4] != 2 or data[5] != 1:
+        raise SystemExit(f"{path} is not a 64-bit little-endian ELF executable")
+    machine = int.from_bytes(data[18:20], byteorder="little")
+    if machine != 183:
+        raise SystemExit(f"{path} has ELF machine {machine}, expected AArch64 (183)")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("archive", type=Path)
@@ -68,10 +91,18 @@ def main() -> None:
                 raise SystemExit(f"Duplicate symlink entry: {link}")
             links[link] = target
 
-        required = ["bin/bash", "bin/env", "bin/git", "bin/jq", "lib/libtermux-exec-ld-preload.so"]
+        required = [
+            "bin/bash", "bin/env", "bin/git", "bin/jq",
+            "lib/libtermux-exec-ld-preload.so",
+            f"bin/{CONFIG['codexPackage']}", f"bin/{CONFIG['codexHelper']}",
+        ]
         missing = [path for path in required if path not in names and path not in links]
         if missing:
             raise SystemExit("Bootstrap is missing required runtime paths: " + ", ".join(missing))
+        if CONFIG["codexPackage"] not in CONFIG["packages"]:
+            raise SystemExit("Codex package is missing from private-runtime-config.json")
+        validate_aarch64_elf(zf, f"bin/{CONFIG['codexPackage']}")
+        validate_aarch64_elf(zf, f"bin/{CONFIG['codexHelper']}")
 
         # Reject any absolute or parent-traversing ZIP member, even if it is
         # not part of the executable set.
@@ -87,7 +118,11 @@ def main() -> None:
         "prefix": CONFIG["prefixSubdir"],
         "home": CONFIG["homeSubdir"],
         "sourceRepository": "https://github.com/termux/termux-packages",
-        "sourceRef": "1d8cc3f98c8a685f3a1475becbb0fe7d7dcda7fd",
+        "sourceRef": locked_ref("termux-packages"),
+        "codexVersion": CONFIG["codexVersion"],
+        "codexSourceRef": locked_ref("codex"),
+        "localizationSourceRef": locked_ref("codex-zh-localization"),
+        "localizationPatchCount": CONFIG["codexLocalizationPatchCount"],
         "packages": CONFIG["packages"],
         "archive": archive.name,
         "archiveSize": archive.stat().st_size,
