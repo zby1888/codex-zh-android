@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "appPackageName": "io.github.zby1888.codexzh.debug",
+  "rootfsSubdir": "files",
+  "prefixSubdir": "runtime/prefix",
+  "homeSubdir": "home",
+  "packages": [
+    "bash",
+    "coreutils",
+    "dash",
+    "diffutils",
+    "findutils",
+    "gawk",
+    "grep",
+    "gzip",
+    "less",
+    "procps",
+    "psmisc",
+    "sed",
+    "tar",
+    "util-linux",
+    "git",
+    "openssl",
+    "ca-certificates",
+    "libcurl",
+    "jq",
+    "termux-exec"
+  ],
+  "notes": "This bootstrap is built for the debug applicationId. A release bootstrap must be built separately for io.github.zby1888.codexzh."
+}

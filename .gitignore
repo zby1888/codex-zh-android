@@ -9,3 +9,4 @@ captures/
 *.aab
 .env
 secrets.properties
+/runtime/dist/
