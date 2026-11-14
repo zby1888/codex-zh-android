@@ -323,15 +323,16 @@ internal class RuntimeBootstrapInstaller(
         if (error.errno == OsConstants.ENOENT) null else throw error
     }
 
+    /**
+     * File.delete() removes a symlink itself rather than following its target.
+     * lstat decides whether to recurse, so deletion never walks through links.
+     */
     private fun deleteTreeNoFollow(file: File) {
         val stat = lstatOrNull(file) ?: return
-        when (stat.st_mode and OsConstants.S_IFMT) {
-            OsConstants.S_IFDIR -> {
-                file.listFiles()?.forEach(::deleteTreeNoFollow)
-                Os.rmdir(file.absolutePath)
-            }
-            else -> Os.unlink(file.absolutePath)
+        if ((stat.st_mode and OsConstants.S_IFMT) == OsConstants.S_IFDIR) {
+            file.listFiles()?.forEach(::deleteTreeNoFollow)
         }
+        check(file.delete()) { "无法清理运行时路径：${file.name}" }
     }
 
     private object BuildAbi {

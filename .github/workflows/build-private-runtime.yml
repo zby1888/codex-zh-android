@@ -7,6 +7,7 @@ on:
       - "runtime/**"
       - "scripts/prepare-private-runtime-source.py"
       - "scripts/validate-private-runtime-bootstrap.py"
+      - "app/src/main/java/**"
       - ".github/workflows/build-private-runtime.yml"
   workflow_dispatch:
 
