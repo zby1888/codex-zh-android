@@ -76,6 +76,9 @@ jobs:
           restore-keys: |
             termux-private-runtime-ubuntu24-aarch64-
 
+      - name: Prepare writable Termux cache directory
+        run: mkdir -p "$HOME/.termux-build"
+
       - name: Pull pinned Ubuntu builder base image
         run: docker pull ubuntu:26.04
 
@@ -91,9 +94,12 @@ jobs:
           TERMUX_BUILDER_IMAGE_NAME: codex-runtime-builder:${{ github.sha }}
           CONTAINER_NAME: codex-runtime-builder-${{ github.run_id }}
         run: |
-          # Use the same conservative parallelism as the native CLI workflow.
-          # Mount the host build cache so a retry can reuse completed packages.
-          ./scripts/run-docker.sh --mount-termux-dirs bash -c 'cd /home/builder/termux-packages && export TERMUX_PKG_MAKE_PROCESSES=2 && ./scripts/build-bootstraps.sh --android10 --architectures aarch64'
+          # Mount only the Termux build cache. Do not bind-mount the runner's
+          # /data directory: the bootstrap builder must write /data/TERMUX_ARCH
+          # inside its container, while the runner's /data is not writable.
+          export TERMUX_DOCKER_RUN_EXTRA_ARGS="--volume $HOME/.termux-build:/home/builder/.termux-build"
+          # Keep Rust/C++ compilation conservative to reduce peak runner pressure.
+          ./scripts/run-docker.sh bash -c 'cd /home/builder/termux-packages && export TERMUX_PKG_MAKE_PROCESSES=2 && ./scripts/build-bootstraps.sh --android10 --architectures aarch64'
 
       - name: Validate bootstrap and write provenance
         run: |
