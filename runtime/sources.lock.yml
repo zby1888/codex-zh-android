@@ -1,0 +1,10 @@
+# 来源固定到 tag 或 commit；禁止 main/master/latest 等浮动引用。
+sources:
+  - name: codex
+    repository: https://github.com/openai/codex
+    ref: rust-v0.169.0
+    purpose: Codex CLI and App Server source
+  - name: termux-packages
+    repository: https://github.com/termux/termux-packages
+    ref: 1d8cc3f98c8a685f3a1475becbb0fe7d7dcda7fd
+    purpose: Reference recipes for Android package builds

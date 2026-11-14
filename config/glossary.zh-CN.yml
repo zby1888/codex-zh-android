@@ -1,0 +1,31 @@
+# Codex / OpenCode / Operit / RikkaHub 对照术语
+agent: 智能体
+subagent: 子智能体
+provider: 模型服务商
+model: 模型
+api_key: API 密钥
+base_url: API 基础地址
+mcp_server: MCP 服务
+mcp_tool: MCP 工具
+tool_call: 工具调用
+skill: 技能
+workflow: 工作流
+workspace: 工作区
+session: 会话
+context: 上下文
+context_window: 上下文窗口
+token: Token
+token_usage: Token 用量
+reasoning_effort: 推理强度
+approval: 操作审批
+permission: 权限
+prompt: 提示词
+memory: 记忆
+streaming: 流式输出
+chat: 聊天
+status_line: 状态栏
+worktree: 工作树
+sandbox: 沙盒
+plan_mode: 计划模式
+slash_command: 斜杠命令
+tui: TUI

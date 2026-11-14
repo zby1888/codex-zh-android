@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CodexZh Provider Profile",
+  "type": "object",
+  "required": ["id", "name", "protocol", "baseUrl", "modelId"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "protocol": { "enum": ["openai-responses", "openai-chat-completions", "anthropic-messages", "gemini"] },
+    "baseUrl": { "type": "string", "format": "uri" },
+    "modelId": { "type": "string", "minLength": 1 },
+    "apiKeySecretRef": { "type": ["string", "null"] },
+    "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+    "enabled": { "type": "boolean", "default": true }
+  },
+  "additionalProperties": false
+}
