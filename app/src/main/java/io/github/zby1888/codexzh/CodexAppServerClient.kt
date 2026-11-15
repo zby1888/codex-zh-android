@@ -26,7 +26,8 @@ import java.util.concurrent.atomic.AtomicLong
  */
 internal class CodexAppServerClient(
     private val paths: RuntimePaths,
-    private val listener: Listener = NoopListener
+    private val listener: Listener = NoopListener,
+    private val environmentOverrides: Map<String, String> = emptyMap()
 ) : Closeable {
 
     interface Listener {
@@ -79,7 +80,13 @@ internal class CodexAppServerClient(
             "--listen",
             "stdio://"
         ).directory(paths.home)
-        builder.environment().putAll(paths.environment())
+        val childEnvironment = builder.environment()
+        childEnvironment.putAll(paths.environment())
+        environmentOverrides.forEach { (key, value) ->
+            require(key.matches(Regex("[A-Z_][A-Z0-9_]{0,127}"))) { "运行环境变量名称不合法" }
+            require(!value.contains('\\u0000')) { "运行环境变量内容不合法" }
+            childEnvironment[key] = value
+        }
 
         val child = builder.start()
         process = child
