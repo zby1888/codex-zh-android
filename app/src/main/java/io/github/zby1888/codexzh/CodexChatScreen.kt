@@ -1243,7 +1243,7 @@ internal fun CodexChatScreen(
                         modifier = Modifier.fillMaxWidth(),
                         enabled = !state.isSubmitting && !state.isWorking
                     ) {
-                        Text("项目：\${state.workingDirectory?.substringAfterLast('/') ?: "选择项目"}")
+                        Text("项目：${state.workingDirectory?.substringAfterLast('/') ?: "选择项目"}")
                     }
                     Divider()
                     Text("会话记录", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
