@@ -25,7 +25,7 @@ internal data class TerminalFrame(
 
 internal class NativePtyBridge {
     init { System.loadLibrary("codex_terminal") }
-    external fun nativeCreate(shellPath:String,workingDirectory:String,environmentKeys:Array<String>,environmentValues:Array<String>,rows:Int,columns:Int):Long
+    external fun nativeCreate(shellPath:String,arguments:Array<String>,workingDirectory:String,environmentKeys:Array<String>,environmentValues:Array<String>,rows:Int,columns:Int):Long
     external fun nativeRead(handle:Long,buffer:ByteArray,timeoutMillis:Int):Int
     external fun nativeWrite(handle:Long,bytes:ByteArray):Int
     external fun nativeResize(handle:Long,rows:Int,columns:Int):Boolean
@@ -44,12 +44,13 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
 
     var frame by mutableStateOf(TerminalFrame.blank(24,80)); private set
     var isRunning by mutableStateOf(false); private set
+    var isRootSession by mutableStateOf(false); private set
     var message by mutableStateOf("终端尚未启动"); private set
     var workingDirectory by mutableStateOf<String?>(null); private set
     var rows:Int=24; private set
     var columns:Int=80; private set
 
-    suspend fun start(workingDirectory:String,rows:Int=this.rows,columns:Int=this.columns) {
+    suspend fun start(workingDirectory:String,rows:Int=this.rows,columns:Int=this.columns,rootSuPath:String?=null) {
         check(!isRunning && handle==0L){"终端会话已经启动"}
         val cwd=File(workingDirectory).canonicalFile
         check(cwd.isDirectory){"项目目录不存在或不是文件夹："+cwd.name}
@@ -61,22 +62,63 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
             put("PS1","\\u@codex:\\w\\$ ")
             put("HISTFILE",File(paths.home,".bash_history").absolutePath)
         }
+        val isRoot = !rootSuPath.isNullOrBlank()
+        val executable: String
+        val arguments: Array<String>
+        if (!isRoot) {
+            executable = paths.bash.absolutePath
+            arguments = arrayOf(executable, "-i")
+        } else {
+            val su = File(rootSuPath!!)
+            check(su.isFile && su.canExecute()) { "Root 管理器提供的 su 路径已不可用，请重新申请授权" }
+            // Do not inject the Termux exec preload into a root-owned process.
+            environment.remove("LD_PRELOAD")
+            val exportedKeys = listOf(
+                "PREFIX", "TERMUX_PREFIX", "TERMUX__PREFIX", "TERMUX__ROOTFS",
+                "TERMUX__HOME", "TERMUX_ANDROID_HOME", "TERMUX_APP__PACKAGE_NAME",
+                "HOME", "CODEX_HOME", "TMPDIR", "PATH", "LD_LIBRARY_PATH",
+                "TERM", "LANG", "LC_ALL"
+            )
+            val rootCommand = buildString {
+                append("cd -- ").append(shellQuote(cwd.absolutePath)).append(" && ")
+                exportedKeys.forEach { key ->
+                    environment[key]?.let { value ->
+                        append("export ").append(key).append('=').append(shellQuote(value)).append("; ")
+                    }
+                }
+                append("unset LD_PRELOAD; export PS1='root@codex:\\w# '; exec ")
+                    .append(shellQuote(paths.bash.absolutePath)).append(" -i")
+            }
+            executable = su.absolutePath
+            // This is a fixed su operation; paths are shell-quoted and no user command is interpolated.
+            arguments = arrayOf(executable, "-c", rootCommand)
+        }
+
         val newHandle=nativeMutex.withLock {
             withContext(Dispatchers.IO) {
-                bridge.nativeCreate(paths.bash.absolutePath,cwd.absolutePath,
+                bridge.nativeCreate(executable,arguments,cwd.absolutePath,
                     environment.keys.toTypedArray(),environment.values.toTypedArray(),rows,columns)
             }
         }
         check(newHandle!=0L){"无法创建交互式 PTY"}
         this.rows=rows; this.columns=columns; handle=newHandle
         this.workingDirectory=cwd.absolutePath
-        frame=decodeSnapshot(nativeMutex.withLock {
-            withContext(Dispatchers.IO) { bridge.nativeSnapshot(newHandle) }
-        })
+        try {
+            frame=decodeSnapshot(nativeMutex.withLock {
+                withContext(Dispatchers.IO) { bridge.nativeSnapshot(newHandle) }
+            })
+        } catch (error: Exception) {
+            handle=0L
+            nativeMutex.withLock { runCatching { bridge.nativeClose(newHandle) } }
+            throw error
+        }
+        isRootSession=isRoot
         isRunning=true
-        message="已启动应用私有 Bash · "+cwd.name
+        message=if(isRoot) "已启动独立 Root Bash · "+cwd.name else "已启动应用私有 Bash · "+cwd.name
         readerJob=scope.launch{readLoop(newHandle)}
     }
+
+    private fun shellQuote(value:String):String = "'" + value.replace("'","'\\''") + "'"
 
     fun sendLine(value:String)=sendInput(value+"\r")
     fun sendInput(value:String) {
@@ -118,6 +160,7 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
         val current=handle
         if(current==0L)return
         handle=0L
+        isRootSession=false
         val reader=readerJob
         readerJob=null
         reader?.cancel()
@@ -163,7 +206,7 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
     private suspend fun finish(activeHandle:Long,status:String,finalFrame:TerminalFrame?=null) {
         withContext(Dispatchers.Main.immediate) {
             if(handle==activeHandle) {
-                handle=0L; isRunning=false; message=status
+                handle=0L; isRunning=false; isRootSession=false; message=status
                 if(finalFrame!=null) frame=finalFrame
             }
         }
