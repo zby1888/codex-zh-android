@@ -20,7 +20,7 @@
 | 命令、文件、网络权限 | 审批弹层 | App Server server-initiated approval 请求 | 显示具体动作和范围；支持允许一次、允许本会话、拒绝、取消等协议支持的选项 |
 | 模型和推理强度 | 聊天工具栏 / 设置 | model/list、thread/start、turn/start | 已接入动态模型目录和推理强度选择；需验证不同中转站的模型目录与参数兼容性 |
 | 沙盒和审批策略 | 项目设置 / 会话设置 | App Server 配置与线程参数 | 清楚显示权限边界；危险选项二次确认 |
-| 项目目录与工作区 | 项目选择器 | cwd、项目发现、私有 HOME | 已接入私有 `HOME/projects` 列表/创建/切换；聊天和终端共享路径，PTY 仍待实现 |
+| 项目目录与工作区 | 项目选择器 | cwd、项目发现、私有 HOME | 已接入私有 HOME/projects 列表/创建/切换；聊天、普通 PTY 和 Root PTY 共享经过校验的项目路径，但进程和权限相互隔离 |
 | 项目指令文件 | 项目详情 | Codex 指令发现 / 文件查看 | 显示已加载的指令来源 |
 | MCP 服务 | MCP 管理 | config/batchWrite、config/mcpServer/reload、mcpServerStatus/list、mcpServer/oauthLogin | 已接入 STDIO / Streamable HTTP 新增、删除、状态/工具清单和 OAuth 浏览器授权入口；Bearer Token 与自定义 HTTP Header 表单及环境变量映射已通过 UI-only Build #103 编译；编辑、启停和真实 MCP 服务器认证/授权实机验证仍待完成 |
 | MCP 工具调用 | 聊天工具卡片 | mcpServer/tool/call、工具事件 | 展示参数、进度、结果和审批 |
@@ -30,9 +30,10 @@
 | 代码审查 | 会话操作菜单 | review/start | 已接入未提交改动审查入口（包含暂存、未暂存及未跟踪文件）；分支、提交和自定义审查目标待补 |
 | 配置查看和编辑 | 设置中心 / 高级配置 | config/read、config/value/write、config/batchWrite | 修改前预览，保存后重新读取验证 |
 | 上下文压缩 | 会话操作菜单 | thread/compact/start | 已接入当前会话压缩入口；压缩完成事件和实机行为待验证 |
-| 终端交互 | 终端页 | Android PTY + 终端模拟器 | 真正 TTY、交互程序、信号、窗口尺寸、多会话 |
+| 终端交互 | 终端页 | NDK / JNI PTY + libvterm + Compose Canvas | 首版真实 PTY、私有 Bash、输入、resize、退出码和关闭清理已接入；多会话、滚动缓冲、完整 IME 与 Android 真机验收仍待完成 |
 | 文件浏览 | 工作区文件页 | App Server 文件接口或安全文件层 | 读写、重命名、删除均有边界和确认 |
 | 快捷命令 / 斜杠命令 | 输入框命令面板 | 对应 App Server 方法或 CLI 命令映射 | 每条命令标注是否支持、是否需要终端回退 |
+| Root 授权与设备级调试 | 终端 Root 开关 / 后续工具中心 | RootAccessManager、su 授权探测、独立 Root PTY；未来 Root Tool Gateway | Root 申请与独立 PTY 启动入口已接线，Magisk / KernelSU 实机验收待完成；Codex Agent 尚不能调用 Root 工具。进程附加、内存读取、Hook / 注入和系统写入需逐项审批 |
 | 日志、错误和诊断 | 运行状态 / 诊断页 | App Server 通知、进程 stderr、结构化错误 | 不泄露 API Key、环境变量密钥或隐私内容 |
 
 ## OpenCode 与 Operit 的参考映射
@@ -45,6 +46,8 @@
 | OpenCode | 事件驱动的消息与工具状态、可折叠工具输出 | 聊天时间线、执行详情卡片 | 以 Codex item/turn 事件为数据源 |
 | OpenCode | Build / Plan 等 Agent 模式、子 Agent 和权限配置 | Agent 模式选择、计划视图、子任务视图 | 仅在锁定版 Codex 暴露对应能力时启用 |
 | OpenCode | MCP、Skills、自定义命令、项目级配置 | 工具与扩展中心、命令面板、项目设置 | 按 Codex 支持的配置格式和协议适配 |
+| OpenCode | action/resource 权限规则、默认 ask、审批请求生命周期 | 未来 Root Tool Gateway 和统一审批队列 | 借鉴权限模型，不复制 OpenCode runtime；Root 特权操作需用户明确确认 |
+| Operit | Root / Shizuku / 普通 Shell 分层、工具权限三档、设备调试工作台 | Root 终端、后续设备诊断和调试工具 | Root PTY 已有入口但未真机验收；不复制 Operit GPL/LGPL 源码 |
 | OpenCode | Git worktree 和项目隔离 | 项目 / 工作区管理 | 由本地 Git 执行，操作前展示目录和风险 |
 | Operit | 移动端任务工作台、附件、上下文和执行进度 | Android 聊天首页、任务详情和附件栏 | 任务执行仍交给 Codex Agent |
 | Operit | 文件、终端、浏览器和 Android 能力整合 | 工具中心、文件页、PTY 终端、可选 Android 工具 | Android 系统能力必须逐项授权，不默认开放 |
@@ -60,7 +63,7 @@
 4. 许可证和第三方依赖是否允许复用；
 5. 自动化测试与 Android 实机验收方式。
 
-真正 PTY 终端的模块、验收和许可证要求见 [TERMINAL-PTY-ARCHITECTURE.md](TERMINAL-PTY-ARCHITECTURE.md)。
+PTY / Root 终端的模块、验收和许可证要求见 [TERMINAL-PTY-ARCHITECTURE.md](TERMINAL-PTY-ARCHITECTURE.md)；逆向与动态调试的权限边界见 [ROOT-DEBUGGING-ARCHITECTURE.md](ROOT-DEBUGGING-ARCHITECTURE.md)。
 
 ## 必须保留的两个独立执行通道
 
