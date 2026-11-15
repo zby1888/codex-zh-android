@@ -24,7 +24,7 @@ internal class CodexWorkspaceRepository(home: File) {
             "项目名称不能为空，且不能超过 64 个字符"
         }
         require(cleanName != "." && cleanName != "..") { "项目名称不合法" }
-        require(cleanName.none { it == '/' || it == '\\' || it == '\\u0000' }) {
+        require(cleanName.none { it == '/' || it == '\\' || it == '\u0000' }) {
             "项目名称不能包含路径分隔符"
         }
         ensureProjectsRoot()
