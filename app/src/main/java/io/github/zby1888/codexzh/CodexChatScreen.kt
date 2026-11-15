@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -577,6 +578,7 @@ internal fun CodexChatScreen(
     var goalBudget by remember { mutableStateOf("") }
     var goalStatus by remember { mutableStateOf<String?>(null) }
     var toolsMenuExpanded by remember { mutableStateOf(false) }
+    var sessionSearchQuery by remember { mutableStateOf("") }
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val handler = remember { Handler(Looper.getMainLooper()) }
     suspend fun ensureAgent(): CodexAgentController {
@@ -1221,21 +1223,31 @@ internal fun CodexChatScreen(
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
-            ModalDrawerSheet {
+            // RikkaHub uses a 300dp chat-history drawer; keep this panel compact on phones.
+            ModalDrawerSheet(modifier = Modifier.width(300.dp)) {
                 Column(
-                    Modifier.fillMaxSize().padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text("Codex", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-                    Button(
-                        onClick = {
-                            startNewConversation()
-                            scope.launch { drawerState.close() }
-                        },
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        enabled = !state.isSubmitting
-                    ) { Text("＋ 新建聊天") }
-                    OutlinedButton(
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Codex",
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        TextButton(
+                            onClick = {
+                                startNewConversation()
+                                scope.launch { drawerState.close() }
+                            },
+                            enabled = !state.isSubmitting && !state.isWorking
+                        ) { Text("＋ 新建") }
+                    }
+                    TextButton(
                         onClick = {
                             scope.launch { drawerState.close() }
                             openWorkspacePicker()
@@ -1243,132 +1255,178 @@ internal fun CodexChatScreen(
                         modifier = Modifier.fillMaxWidth(),
                         enabled = !state.isSubmitting && !state.isWorking
                     ) {
-                        Text("项目：${state.workingDirectory?.substringAfterLast('/') ?: "选择项目"}")
+                        Text(
+                            "项目 · ${state.workingDirectory?.substringAfterLast('/') ?: "选择工作区"}",
+                            modifier = Modifier.fillMaxWidth(),
+                            maxLines = 1
+                        )
                     }
                     Divider()
-                    Text("会话记录", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
                         TextButton(
                             onClick = {
                                 state.showArchivedThreads = false
                                 refreshThreads()
                             },
-                            enabled = !state.isSubmitting && state.showArchivedThreads
+                            enabled = !state.isSubmitting && state.showArchivedThreads,
+                            modifier = Modifier.weight(1f)
                         ) { Text("最近") }
                         TextButton(
                             onClick = {
                                 state.showArchivedThreads = true
                                 refreshThreads()
                             },
-                            enabled = !state.isSubmitting && !state.showArchivedThreads
+                            enabled = !state.isSubmitting && !state.showArchivedThreads,
+                            modifier = Modifier.weight(1f)
                         ) { Text("已归档") }
-                        Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { refreshThreads() }, enabled = !state.isSubmitting) {
-                            Text("刷新")
-                        }
+                        TextButton(
+                            onClick = { refreshThreads() },
+                            enabled = !state.isSubmitting
+                        ) { Text("刷新") }
                     }
-                    if (state.recentThreads.isEmpty()) {
-                        Text(
-                            if (state.isSubmitting) "正在读取会话…" else "这里还没有会话记录",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            items(state.recentThreads, key = { it.id }) { summary ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    OutlinedTextField(
+                        value = sessionSearchQuery,
+                        onValueChange = { sessionSearchQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = { Text("筛选会话") }
+                    )
+                    val visibleThreads = state.recentThreads.filter { summary ->
+                        sessionSearchQuery.isBlank() ||
+                            summary.title.contains(sessionSearchQuery, ignoreCase = true) ||
+                            summary.preview.contains(sessionSearchQuery, ignoreCase = true)
+                    }
+                    LazyColumn(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        if (visibleThreads.isEmpty()) {
+                            item {
+                                Text(
+                                    when {
+                                        state.isSubmitting -> "正在读取会话…"
+                                        state.recentThreads.isEmpty() -> "这里还没有会话记录"
+                                        else -> "没有找到匹配的会话"
+                                    },
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 12.dp),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        items(visibleThreads, key = { it.id }) { summary ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                            ) {
+                                TextButton(
+                                    onClick = {
+                                        if (summary.id != state.threadId) resumeThread(summary)
+                                        scope.launch { drawerState.close() }
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    enabled = !state.isSubmitting &&
+                                        (!state.isWorking || summary.id == state.threadId)
                                 ) {
-                                    TextButton(
-                                        onClick = {
-                                            resumeThread(summary)
-                                            scope.launch { drawerState.close() }
-                                        },
-                                        modifier = Modifier.weight(1f),
-                                        enabled = !state.isSubmitting
-                                    ) {
-                                        Column(Modifier.fillMaxWidth()) {
-                                            Text(
-                                                summary.title,
-                                                maxLines = 1,
-                                                fontWeight = if (summary.id == state.threadId) FontWeight.SemiBold else FontWeight.Normal
-                                            )
-                                            if (summary.preview.isNotBlank() && summary.preview != summary.title) {
-                                                Text(
-                                                    summary.preview,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    maxLines = 1,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
+                                    Column(Modifier.fillMaxWidth()) {
+                                        Text(
+                                            summary.title,
+                                            maxLines = 1,
+                                            fontWeight = if (summary.id == state.threadId) {
+                                                FontWeight.SemiBold
+                                            } else {
+                                                FontWeight.Normal
                                             }
+                                        )
+                                        if (summary.preview.isNotBlank() && summary.preview != summary.title) {
+                                            Text(
+                                                summary.preview,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                maxLines = 1,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
                                         }
                                     }
-                                    Box {
-                                        TextButton(
-                                            onClick = { actionMenuThreadId = summary.id },
-                                            enabled = !state.isSubmitting
-                                        ) { Text("⋯") }
-                                        DropdownMenu(
-                                            expanded = actionMenuThreadId == summary.id,
-                                            onDismissRequest = { actionMenuThreadId = null }
-                                        ) {
-                                            DropdownMenuItem(
-                                                text = { Text("从这里分支") },
-                                                onClick = {
-                                                    actionMenuThreadId = null
-                                                    forkThread(summary)
-                                                    scope.launch { drawerState.close() }
-                                                }
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text("重命名") },
-                                                onClick = {
-                                                    actionMenuThreadId = null
-                                                    renameTarget = summary
-                                                    renameValue = summary.title
-                                                }
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text(if (state.showArchivedThreads) "取消归档" else "归档") },
-                                                onClick = {
-                                                    actionMenuThreadId = null
-                                                    if (state.showArchivedThreads) unarchiveThread(summary)
-                                                    else archiveTarget = summary
-                                                }
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text("删除会话") },
-                                                onClick = {
-                                                    actionMenuThreadId = null
-                                                    deleteTarget = summary
-                                                }
-                                            )
-                                        }
+                                }
+                                Box {
+                                    TextButton(
+                                        onClick = { actionMenuThreadId = summary.id },
+                                        enabled = !state.isSubmitting
+                                    ) { Text("⋯") }
+                                    DropdownMenu(
+                                        expanded = actionMenuThreadId == summary.id,
+                                        onDismissRequest = { actionMenuThreadId = null }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("从这里分支") },
+                                            onClick = {
+                                                actionMenuThreadId = null
+                                                forkThread(summary)
+                                                scope.launch { drawerState.close() }
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("重命名") },
+                                            onClick = {
+                                                actionMenuThreadId = null
+                                                renameTarget = summary
+                                                renameValue = summary.title
+                                                scope.launch { drawerState.close() }
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(if (state.showArchivedThreads) "取消归档" else "归档") },
+                                            onClick = {
+                                                actionMenuThreadId = null
+                                                if (state.showArchivedThreads) unarchiveThread(summary)
+                                                else archiveTarget = summary
+                                                scope.launch { drawerState.close() }
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("删除会话") },
+                                            onClick = {
+                                                actionMenuThreadId = null
+                                                deleteTarget = summary
+                                                scope.launch { drawerState.close() }
+                                            }
+                                        )
                                     }
                                 }
                             }
                         }
                     }
                     Divider()
-                    Text("工作工具", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                    TextButton(
-                        onClick = {
-                            scope.launch { drawerState.close() }
-                            onOpenTerminal()
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("终端") }
-                    TextButton(
-                        onClick = {
-                            scope.launch { drawerState.close() }
-                            onOpenMcp()
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("MCP 工具") }
+                    Text(
+                        "工具与设置",
+                        modifier = Modifier.padding(start = 8.dp, top = 2.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        TextButton(
+                            onClick = {
+                                scope.launch { drawerState.close() }
+                                onOpenTerminal()
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("终端") }
+                        TextButton(
+                            onClick = {
+                                scope.launch { drawerState.close() }
+                                onOpenMcp()
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("MCP 工具") }
+                    }
                     TextButton(
                         onClick = {
                             scope.launch { drawerState.close() }
@@ -1378,7 +1436,8 @@ internal fun CodexChatScreen(
                     ) { Text("服务商与模型设置") }
                     if (providerRepository.getDefaultCodexAgent() == null) {
                         Text(
-                            "还没有配置 Codex Agent 服务商，需要兼容 Responses API 的中转站。",
+                            "尚未配置兼容 Responses API 的服务商",
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1419,7 +1478,7 @@ internal fun CodexChatScreen(
                 }
                 TextButton(
                     onClick = { startNewConversation() },
-                    enabled = !state.isSubmitting
+                    enabled = !state.isSubmitting && !state.isWorking
                 ) { Text("新建") }
             }
             Row(

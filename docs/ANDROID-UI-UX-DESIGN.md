@@ -67,6 +67,19 @@ https://help.openai.com/en/articles/6825453-chatgpt-release-notes
 - 网络断开、服务商错误、运行环境未安装、模型不兼容和审批等待应使用口语化中文说明下一步怎么做，避免只显示原始异常字符串。
 - 动画只用于反馈，不影响性能和可访问性；提供语义标签、对比度和键盘操作支持。
 
+
+## 侧边栏与 Agent 工作区参考
+
+侧边栏不应成为一整页设置面板。手机默认使用约 **300dp** 的临时会话抽屉；主要空间留给聊天。抽屉内部按“新建 / 项目 / 会话 / 工具与设置”组织，会话列表独立滚动，常用导航采用约 40dp 的紧凑条目，低频设置放到底部或二级页面。用户选中会话或切换到其他页面后，抽屉应立即收起。
+
+已核对以下开源实现，借鉴交互模式而非复制源码：
+
+- **RikkaHub**：`ChatDrawer.kt` 使用 `ModalDrawerSheet(Modifier.width(300.dp))`，将顶部动作和会话列表分开布局，并使用 LazyColumn 管理会话浏览；可参考其移动端会话历史组织方式。源码：[ChatDrawer.kt](https://github.com/rikkahub/rikkahub/blob/master/app/src/main/java/me/rerere/rikkahub/ui/pages/chat/ChatDrawer.kt)。
+- **Operit**：`NavigationComponents.kt` 把常用导航压成 40dp 高的紧凑项目，`DrawerContent.kt` 将主要功能分组、固定底部快捷入口；可参考分组和低频功能收纳。源码：[NavigationComponents.kt](https://github.com/AAswordman/Operit/blob/main/app/src/main/java/com/ai/assistance/operit/ui/main/components/NavigationComponents.kt)、[DrawerContent.kt](https://github.com/AAswordman/Operit/blob/main/app/src/main/java/com/ai/assistance/operit/ui/main/components/DrawerContent.kt)。
+- **OpenCode**：窄屏使用临时侧栏 / 面板，并允许独立设置面板宽度；移动端选中会话后必须关闭侧栏，避免内容被抽屉遮住。参考：[GUI 面板布局文档](https://opencode.ai/docs/build/plugins/gui)、[移动端侧栏行为问题与修复讨论](https://github.com/anomalyco/opencode/issues/37746)。
+
+RikkaHub 使用 AGPL-3.0、Operit 使用 LGPL-3.0、OpenCode 使用 MIT。此处仅参考可观察到的布局和交互原则；不复制其代码、图标、资源或专有文案。引入任何源码前仍需单独审查许可证和兼容义务。
+
 ## 实施优先级
 
 1. **先整理聊天页骨架**：简化顶部、增加会话导航抽屉，把模型/推理和项目上下文收紧，固定底部输入区。
