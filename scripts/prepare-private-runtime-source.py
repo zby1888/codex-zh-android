@@ -164,6 +164,12 @@ def main() -> None:
         + "\n"
     )
     bootstrap = bootstrap[:start] + replacement + bootstrap[end:]
+    bootstrap = replace_once(
+        bootstrap,
+        '\techo $\'\\n\\n\\n\'"[*] Adding termux bootstrap second stage files..."\n',
+        '\techo $\'\\n\\n\\n\'"[*] Adding termux bootstrap second stage files..."\n\n\tmkdir -p "${BOOTSTRAP_ROOTFS}/${TERMUX__PREFIX__PROFILE_D_DIR}"\n',
+        "create the profile.d directory before writing the fallback script",
+    )
     # Write the generated archive into output/, which is already writable for
     # package artifacts under the Termux builder's restricted container profile.
     bootstrap = replace_once(
