@@ -69,14 +69,14 @@ def main() -> None:
     git_recipe = git_recipe_path.read_text(encoding="utf-8")
     git_recipe = replace_once(
         git_recipe,
-        "--with-tcltk=$TERMUX_PREFIX/bin/wish\\n",
+        "--with-tcltk=$TERMUX_PREFIX/bin/wish\n",
         "",
         "omit optional Git GUI/Tcl-Tk configure dependency",
     )
     git_recipe = replace_once(
         git_recipe,
-        "NO_GETTEXT=1\\n",
-        "NO_GETTEXT=1\\nNO_TCLTK=1\\nNO_PERL=1\\nNO_PYTHON=1\\n",
+        "NO_GETTEXT=1\n",
+        "NO_GETTEXT=1\nNO_TCLTK=1\nNO_PERL=1\nNO_PYTHON=1\n",
         "disable optional Git GUI, Perl and Python integrations",
     )
     if "--with-tcltk=" in git_recipe or any(
