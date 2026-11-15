@@ -485,7 +485,7 @@ internal fun CodexMcpScreen(
                     Text("还没有读取到 MCP 服务", fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "先点击“连接 Codex 并读取”；也可以从本页新增 STDIO 或 Streamable HTTP 服务。当前支持新增、删除和 OAuth 授权，暂不支持直接编辑已有条目；需要修改时请删除后重新添加。",
+                        "先点击“连接 Codex 并读取”。如果列表仍为空，请检查应用私有 CODEX_HOME 中的 MCP 配置。下一步会补上在 App 内添加、编辑和删除 MCP 服务的表单。",
                         style = MaterialTheme.typography.bodySmall
                     )
                 }

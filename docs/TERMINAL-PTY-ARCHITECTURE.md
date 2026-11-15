@@ -2,7 +2,15 @@
 
 ## 目标与边界
 
-终端页最终必须是应用自己私有 ARM64/Bionic 环境里的真实交互式 PTY，不是单次 `ProcessBuilder` 命令，也不是聊天消息列表伪装的控制台。聊天 Agent 和 Shell Terminal 是两个独立执行通道，但共享用户选择的私有项目工作区。
+终端页必须运行在应用自己私有 ARM64/Bionic 环境的真实 PTY 中，不能用单次 `ProcessBuilder` 命令或聊天消息列表伪装。聊天 Agent 和 Shell Terminal 是两个独立执行通道，但共享用户选择的私有项目工作区。
+
+## 当前实现进度
+
+- 已加入 NDK PTY 主从设备、独立 Bash 子进程、终端窗口尺寸同步、原始输入写入、子进程退出码和关闭清理。
+- 已加入固定版本 libvterm 的 VT 状态解析，并由 Compose Canvas 按字符单元、前景/背景色、粗体、斜体、下划线、反显和光标状态绘制。
+- 终端会话由应用级对象持有，切换聊天/MCP/服务商页面不会自动杀掉 Shell；退出应用时清理子进程组。
+- 首版提供单个 PTY 会话、命令/交互行输入、Ctrl+C、Ctrl+D、Tab、Esc 和方向键快捷键；滚动缓冲、多标签终端、鼠标协议、完整 IME 实时组合输入和 Android 真机端到端验收仍待完成。
+- CI 只证明 NDK 编译与 APK 打包通过；PTY 创建、信号、窗口 resize、vim/less/top 和横竖屏行为仍需 Android 14 ARM64 真机验收。
 
 - Agent：由 `codex app-server --listen stdio://` 负责会话、工具调用、审批和文件变更。
 - Terminal：由 Android Terminal Session Manager 管理一个或多个 PTY 子进程，运行应用私有 PREFIX 下的 Bash。

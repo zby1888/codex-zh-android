@@ -121,8 +121,6 @@ def main() -> None:
         "sourceRef": locked_ref("termux-packages"),
         "codexVersion": CONFIG["codexVersion"],
         "codexSourceRef": locked_ref("codex"),
-        "localizationSourceRef": locked_ref("codex-zh-localization"),
-        "localizationPatchCount": CONFIG["codexLocalizationPatchCount"],
         "packages": CONFIG["packages"],
         "archive": archive.name,
         "archiveSize": archive.stat().st_size,

@@ -132,7 +132,7 @@ internal fun ProviderScreen(modifier: Modifier = Modifier) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("模型服务商", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "Codex Agent 目前只支持 Responses API 兼容服务商。Chat Completions、Anthropic 和 Gemini 配置可以先保存，但对应的通用聊天适配器尚未接入，暂时不能在聊天页使用。",
+                    "Codex Agent 使用 Responses API 兼容服务商；Chat Completions、Anthropic 和 Gemini 作为独立通用聊天协议。",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Button(onClick = ::openNew, modifier = Modifier.fillMaxWidth()) {

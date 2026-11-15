@@ -8,3 +8,7 @@ sources:
     repository: https://github.com/termux/termux-packages
     ref: 1d8cc3f98c8a685f3a1475becbb0fe7d7dcda7fd
     purpose: Reference recipes for Android package builds
+  - name: libvterm
+    repository: https://github.com/neovim/libvterm
+    ref: 934bc2fbf21800ac3458a499df8820ca5fb45fd3
+    purpose: MIT-licensed VT parser used by the Android native terminal surface
