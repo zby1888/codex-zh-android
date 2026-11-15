@@ -11,11 +11,11 @@
 
 - 已新增 `CodexAppServerClient`：在应用私有运行时启动 `codex app-server --listen stdio://`，通过 JSONL 读写 JSON-RPC 消息。
 - 已实现请求 ID 与响应关联、初始化握手、通知分发、服务端请求回调、服务端请求响应/拒绝、进程退出处理和连接关闭。
-- 已新增 `CodexAgentController`，封装 model/list、thread/start、thread/resume、thread/list、thread/turns/list、thread/items/list、thread/fork、thread/archive、thread/unarchive、thread/delete、turn/start、turn/steer 和 turn/interrupt。
+- 已新增 `CodexAgentController`，封装 model/list、thread/start、thread/resume、thread/list、thread/turns/list、thread/items/list、thread/fork、thread/setName、thread/archive、thread/unarchive、thread/delete、thread/compact/start、review/start、goal get/set/clear、turn/start、turn/steer 和 turn/interrupt。
 - Agent 协议进程与交互式 PTY 终端分离；该类不得复用终端的 stdin/stdout。
 - 已接入基础聊天 UI：连接 `CodexAgentRuntimeFactory`、创建/列出/恢复会话、通过 `thread/items/list` 还原历史、发送用户消息、处理 `turn/start`、追加指令和中断轮次；UI 会接收 `item/agentMessage/delta`、命令输出增量、item 开始/完成、文件变更和 turn 完成事件，并显示对应卡片。已增加命令执行与文件修改审批卡片，未知服务端请求不会自动放行。
 - **尚未完成实机端到端验证**：当前代码构建不等于 Codex 进程已在 Android 私有运行时成功启动，也不等于第三方 Responses 中转站已经兼容。
-- 会话列表与历史恢复的基础 UI 已接入，但历史分页、断线自动恢复、本地索引/收藏和跨进程状态恢复尚待实现；MCP 协议操作层已建立，但配置编辑、完整审批交互和本地 STDIO MCP 运行时仍待实现。服务商管理和密钥注入底层已实现，但连接测试与真实中转站兼容性尚未验证。真正 PTY 终端仍待实现。
+- 会话列表、最近/已归档切换、恢复、分支、重命名、归档/取消归档、删除的 UI 已接入；模型目录通过 `model/list` 动态读取，模型与推理强度会传入 `thread/start` / `turn/start`。这些新增交互正在新一轮 UI 构建验证；历史分页、断线自动恢复、本地索引/收藏和跨进程状态恢复尚待实现。MCP 协议操作层已建立，但配置编辑、完整审批交互和本地 STDIO MCP 运行时仍待实现。服务商管理和密钥注入底层已实现，但连接测试与真实中转站兼容性尚未验证。真正 PTY 终端仍待实现。
 
 ## 协议握手
 
@@ -39,6 +39,6 @@
 1. 在 ARM64 私有运行时实际启动该版本 App Server，验证 initialize / initialized 往返。
 2. 生成并保存该版本的 JSON Schema，作为 Kotlin 请求/事件解析的版本依据。
 3. 已在聊天 UI 接入 model/thread/turn 控制路径、thread/list、resume 和基础 history item hydration；下一步补齐分页、本地会话索引、收藏/搜索和断线恢复。
-4. 已把 agentMessage delta、command output、item lifecycle、file change、turn completion 和初步 approval request 映射为 UI 状态；下一步补齐事件去重、历史恢复和完整审批类型。
+4. 已把 agentMessage delta、command output、plan delta、reasoning summary、MCP progress、item lifecycle、file change patch update、turn completion 和初步 approval request 映射为 UI 状态；不支持的服务端请求可显式拒绝而不会自动放行。下一步补齐事件去重、历史恢复和权限/用户输入/elicitation 等审批类型。
 5. 实现 thread 生命周期持久化、断线重连和进程恢复。
 6. 在 Android 14 实机上验证第三方 Responses 兼容中转站；不能以 HTTP 200 代替完整协议兼容测试。
