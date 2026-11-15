@@ -22,8 +22,19 @@ Termux 的 `terminal-view` / `terminal-emulator` 源码属于 GPL-3.0 系列；T
 - 核实该固定版本的 SPDX 标识、传递依赖和 NOTICE；
 - 明确本项目整体发布许可证是否允许采用该组件；
 - 保存依赖版本、来源提交、校验和及许可证清单；
-- 如果许可证不合适，改为使用许可兼容的 VT parser（例如独立审查 libvterm 的许可证）并自行实现 Android View/Compose 渲染层；
+- 当前优先评估 **libvterm**（https://github.com/neovim/libvterm）：上游为 MIT 许可证、C99 VT220/xterm 解析器，通过回调把终端状态变化交给宿主；可由 NDK/CMake 编译进 ARM64 APK，再由项目自行实现 Compose/Canvas 字符网格、字体、光标、选区、IME 和快捷键层。它只是 VT parser，不是现成 Android TerminalView，也不会替我们创建 PTY。
+- libvterm 的来源仓库 `neovim/libvterm` 已归档为只读镜像，正式接入前要确认可追溯的上游版本、固定 commit、MIT LICENSE、所有生成文件和构建脚本；不得只凭搜索结果里的许可证标签就跳过审查。
+- 如果许可证不合适，改为其他许可证兼容的 VT parser 并自行实现 Android View/Compose 渲染层；
 - 在许可证决策完成前，不复制 Termux/Operit/OpenTerminal 的实现源码。
+
+## 推荐实现路径（当前建议，不代表已经实现）
+
+采用两层分离：
+
+1. **PTY/进程层**：单独的 NDK helper 或经安全审查的 JNI PTY bridge，负责创建 master/slave、启动私有 Bash、I/O、resize、信号和退出状态。必须验证 Android Bionic API 兼容、fork/exec 子进程稳定性以及 app lifecycle；不要直接照抄 Termux 的 forkpty/JNI 实现。
+2. **VT/渲染层**：先评估 MIT libvterm 作为 VT 状态机，通过回调输出 cell、光标、颜色和滚动变化；Android Compose/Canvas 自己渲染。PTY 与渲染层之间用有界队列传输字节和 resize 事件，防止 UI 阻塞。
+
+不要把 PTY 创建和 VT 解析混在同一个 Compose Composable 中；TerminalSessionManager 统一拥有文件描述符和进程，UI 只订阅状态与渲染快照。
 
 ## 建议模块拆分
 
