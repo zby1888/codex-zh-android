@@ -89,11 +89,10 @@ def main() -> None:
     properties_path = source / "scripts/properties.sh"
     bootstrap_path = source / "scripts/build-bootstraps.sh"
     docker_runner_path = source / "scripts/run-docker.sh"
-    host_setup_path = source / "scripts/setup-ubuntu.sh"
     dockerfile_path = source / "scripts/Dockerfile"
 
     if not all(path.is_file() for path in (
-        properties_path, bootstrap_path, docker_runner_path, host_setup_path, dockerfile_path
+        properties_path, bootstrap_path, docker_runner_path, dockerfile_path
     )):
         raise SystemExit(f"Not a supported termux-packages checkout: {source}")
 
@@ -175,33 +174,6 @@ def main() -> None:
     )
     bootstrap_path.write_text(bootstrap, encoding="utf-8")
 
-    # Reduce the Ubuntu Docker builder to the host tools needed by this
-    # Codex-only Android/Bionic package set. Keep texinfo because GNU coreutils
-    # invokes makeinfo during its normal build; omit other documentation generators
-    # and X11/GTK/Qt/Desktop repository dependencies.
-    minimal_host_packages = (
-        "locales python-is-python3 curl gnupg git lzip tar unzip lrzip lzop lz4 zstd "
-        "fuse-overlayfs autoconf automake autopoint bison flex g++ g++-multilib gawk "
-        "gettext gperf texinfo intltool libglib2.0-dev libltdl-dev libtool-bin m4 pkg-config scons "
-        "python3-pip python3-setuptools python-wheel-common python3.14-venv python3-yaml "
-        "libssl-dev libclang-rt-17-dev libclang-rt-17-dev:i386 zip openssl zlib1g-dev "
-        "patchelf jq openjdk-17-jre openjdk-17-jdk"
-    )
-    host_setup = host_setup_path.read_text(encoding="utf-8")
-    host_marker = "# Do not require sudo if already running as root.\n"
-    host_override = (
-        "# Minimal host packages for this Codex-only Android/Bionic runtime.\n"
-        "if [[ \"${TERMUX_PRIVATE_RUNTIME_MINIMAL_BUILDER:-false}\" == \"true\" ]]; then\n"
-        f"    PACKAGES=\"{minimal_host_packages}\"\n"
-        "fi\n\n"
-    )
-    host_setup = replace_once(
-        host_setup,
-        host_marker,
-        host_override + host_marker,
-        "apply minimal host dependency list",
-    )
-    host_setup_path.write_text(host_setup, encoding="utf-8")
 
     # Remove an unconditional host apt upgrade; the Ubuntu base and package
     # setup are pinned by the Dockerfile and this recipe.
@@ -215,7 +187,7 @@ def main() -> None:
     dockerfile = replace_once(
         dockerfile,
         "su - builder -c \"TERMUX_PKGS__BUILD__IS_DOCKER_BUILD='true' /tmp/termux-packages/scripts/setup-ubuntu.sh\"",
-        "su - builder -c \"TERMUX_PRIVATE_RUNTIME_MINIMAL_BUILDER='true' TERMUX_PKGS__BUILD__IS_DOCKER_BUILD='true' /tmp/termux-packages/scripts/setup-ubuntu.sh\"",
+        "su - builder -c \"TERMUX_PKGS__BUILD__IS_DOCKER_BUILD='true' /tmp/termux-packages/scripts/setup-ubuntu.sh\"",
         "enable minimal host builder package set",
     )
     dockerfile_path.write_text(dockerfile, encoding="utf-8")
