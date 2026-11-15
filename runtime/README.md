@@ -40,7 +40,7 @@ Docker builder 直接使用锁定的 Termux Packages commit 自带的 `scripts/s
 
 CI 资源策略：
 
-- 单包/单任务编译，Rust Cargo jobs = 1，禁用增量编译和 Thin LTO，降低 7.7 GiB Runner 上的峰值内存。
+- 单包/单任务编译，Rust Cargo jobs = 1，禁用增量编译和 Thin LTO，控制编译峰值。以实际日志为准：最近一次失败运行的 Runner 报告约 15 GiB 内存，容器峰值约 4.3 GiB，OOM 计数为 0；磁盘峰值也远未接近耗尽。
 - Cargo、Rustup、Termux source/build/cache、安装 PREFIX 和 `/data/data/.built-packages` 版本标记都放在 GitHub Actions 缓存卷中。缓存按来源锁、包配置和补丁脚本隔离；每次运行使用新的快照键，并在成功或失败后保存已完成包标记与部分编译状态，下一轮从最近快照接着做。
 - Docker builder 只构建一次，并使用 BuildKit GHA cache 保存镜像层，避免重复构建后又覆盖带缓存的镜像。
 - 每 2 分钟采集宿主机/容器磁盘、内存、Docker 使用量和 cgroup OOM 事件；构建结束输出明确退出码和最后日志。
