@@ -1,6 +1,8 @@
 package io.github.zby1888.codexzh
 
 import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +18,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -48,6 +52,15 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.FileOutputStream
+import java.util.UUID
+
+internal data class CodexPendingAttachment(
+    val file: File,
+    val displayName: String,
+    val mimeType: String,
+    val inputType: String
+)
 
 internal data class CodexChatEntry(
     val id: String,
@@ -133,6 +146,7 @@ internal class CodexChatUiState {
     val userInputAnswers = mutableStateMapOf<String, String>()
     var needsAgentRestart by mutableStateOf(false)
     val entries = mutableStateListOf<CodexChatEntry>()
+    val pendingAttachments = mutableStateListOf<CodexPendingAttachment>()
     private val mainHandler = Handler(Looper.getMainLooper())
     val appServerListener = object : CodexAppServerClient.Listener {
         override fun onNotification(message: JSONObject) {
@@ -547,6 +561,36 @@ internal fun CodexChatScreen(
     val runtimeManager = remember(context) { RuntimeManager(context) }
     val providerRepository = remember(context) { ProviderRepository(context) }
     var prompt by remember { mutableStateOf("") }
+    val attachmentPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { selectedUris ->
+        if (selectedUris.isNotEmpty()) {
+            scope.launch {
+                state.isSubmitting = true
+                state.error = null
+                try {
+                    val imported = withContext(Dispatchers.IO) {
+                        require(selectedUris.size <= 10) { "一次最多选择 10 个附件" }
+                        var totalBytes = 0L
+                        selectedUris.map { uri ->
+                            copyAttachmentToPrivateFiles(context, uri).also { attachment ->
+                                totalBytes += attachment.file.length()
+                                require(totalBytes <= MAX_ATTACHMENT_BATCH_BYTES) {
+                                    "附件总大小不能超过 50 MB"
+                                }
+                            }
+                        }
+                    }
+                    state.pendingAttachments.addAll(imported)
+                    state.status = "已添加 ${imported.size} 个附件"
+                } catch (failure: Exception) {
+                    state.error = failure.message?.take(500) ?: "导入附件失败"
+                } finally {
+                    state.isSubmitting = false
+                }
+            }
+        }
+    }
     var modelMenuExpanded by remember { mutableStateOf(false) }
     var effortMenuExpanded by remember { mutableStateOf(false) }
     var actionMenuThreadId by remember { mutableStateOf<String?>(null) }
@@ -967,14 +1011,24 @@ internal fun CodexChatScreen(
     }
 
     fun connectAndSend(text: String) {
-        if (state.isSubmitting || text.isBlank()) return
+        val attachments = state.pendingAttachments.toList()
+        if (state.isSubmitting || (text.isBlank() && attachments.isEmpty())) return
+        val input = buildCodexTurnInput(text, attachments)
+        val displayText = buildString {
+            if (text.isNotBlank()) append(text)
+            if (attachments.isNotEmpty()) {
+                if (isNotEmpty()) append("\n")
+                append("附件：")
+                append(attachments.joinToString("、") { it.displayName })
+            }
+        }
         scope.launch {
             state.isSubmitting = true
             state.error = null
             state.entries.add(CodexChatEntry(
                 id = "user:${System.nanoTime()}",
                 title = "你",
-                text = text,
+                text = displayText,
                 isUser = true
             ))
             try {
@@ -995,16 +1049,16 @@ internal fun CodexChatScreen(
                 val activeTurn = state.activeTurnId
                 if (state.isWorking && !activeTurn.isNullOrBlank()) {
                     withContext(Dispatchers.IO) {
-                        agent.steerTurn(threadId, activeTurn, text)
+                        agent.steerTurn(threadId, activeTurn, input)
                     }
-                    state.status = "已把补充指令发送给 Codex"
+                    state.status = "已把补充内容和附件发送给 Codex"
                 } else {
                     val cwd = state.workingDirectory ?: defaultWorkspace(runtimeManager.paths.home)
                     state.isWorking = true
                     val turn = withContext(Dispatchers.IO) {
                         agent.startTurn(
                             threadId,
-                            text,
+                            input,
                             cwd,
                             model = state.selectedModelId,
                             effort = state.selectedReasoningEffort
@@ -1013,6 +1067,7 @@ internal fun CodexChatScreen(
                     if (state.isWorking) state.activeTurnId = turn.id
                     state.status = if (state.isWorking) "已发送，正在等待 Codex 回复" else state.status
                 }
+                state.pendingAttachments.clear()
             } catch (error: Exception) {
                 state.isWorking = false
                 state.activeTurnId = null
@@ -1674,7 +1729,32 @@ internal fun CodexChatScreen(
             }
         }
 
+        if (state.pendingAttachments.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                state.pendingAttachments.forEach { attachment ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            "${if (attachment.inputType == "localImage") "图片" else "文件"}：${attachment.displayName}",
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1
+                        )
+                        TextButton(
+                            onClick = { state.pendingAttachments.remove(attachment) },
+                            enabled = !state.isSubmitting
+                        ) { Text("移除") }
+                    }
+                }
+            }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = { attachmentPicker.launch(arrayOf("*/*")) },
+                enabled = !state.isSubmitting && state.pendingApproval == null && state.pendingUserInput == null
+            ) { Text("附件") }
             OutlinedTextField(
                 value = prompt,
                 onValueChange = { prompt = it },
@@ -1696,7 +1776,8 @@ internal fun CodexChatScreen(
                     prompt = ""
                     connectAndSend(text)
                 },
-                enabled = prompt.isNotBlank() && !state.isSubmitting && state.pendingApproval == null && state.pendingUserInput == null
+                enabled = (prompt.isNotBlank() || state.pendingAttachments.isNotEmpty()) &&
+                    !state.isSubmitting && state.pendingApproval == null && state.pendingUserInput == null
             ) {
                 if (state.isSubmitting) CircularProgressIndicator()
                 else Text(if (state.isWorking) "追加" else "发送")
@@ -1719,3 +1800,90 @@ internal fun CodexChatScreen(
 
 private fun defaultWorkspace(home: File): String =
     CodexWorkspaceRepository(home).defaultWorkspace().canonicalPath
+
+private const val MAX_ATTACHMENT_FILE_BYTES = 20L * 1024L * 1024L
+private const val MAX_ATTACHMENT_BATCH_BYTES = 50L * 1024L * 1024L
+
+private fun buildCodexTurnInput(
+    text: String,
+    attachments: List<CodexPendingAttachment>
+): JSONArray {
+    val input = JSONArray()
+    if (text.isNotBlank()) {
+        input.put(JSONObject().put("type", "text").put("text", text))
+    }
+    attachments.forEach { attachment ->
+        val item = JSONObject()
+            .put("type", attachment.inputType)
+            .put("path", attachment.file.canonicalPath)
+        if (attachment.inputType == "mention") {
+            item.put("name", attachment.displayName)
+        }
+        input.put(item)
+    }
+    return input
+}
+
+private fun copyAttachmentToPrivateFiles(
+    context: Context,
+    uri: Uri
+): CodexPendingAttachment {
+    val resolver = context.contentResolver
+    val mimeType = resolver.getType(uri) ?: "application/octet-stream"
+    val displayName = resolver.query(
+        uri,
+        arrayOf(OpenableColumns.DISPLAY_NAME),
+        null,
+        null,
+        null
+    )?.use { cursor ->
+        if (cursor.moveToFirst()) {
+            val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (index >= 0) cursor.getString(index) else null
+        } else null
+    }?.takeIf { it.isNotBlank() } ?: "attachment"
+
+    val root = File(context.filesDir, "codex-attachments")
+    check(root.mkdirs() || root.isDirectory) { "无法创建应用私有附件目录" }
+    val canonicalRoot = root.canonicalFile
+    val safeName = displayName
+        .replace(Regex("[^A-Za-z0-9._-]"), "_")
+        .take(96)
+        .ifBlank { "attachment" }
+    val target = File(root, "${UUID.randomUUID()}-$safeName")
+    val canonicalTarget = target.canonicalFile
+    val prefix = canonicalRoot.path.trimEnd(File.separatorChar) + File.separator
+    check(canonicalTarget.path.startsWith(prefix)) { "附件路径越界，已拒绝写入" }
+
+    var total = 0L
+    try {
+        val input = resolver.openInputStream(uri)
+            ?: throw IllegalStateException("无法打开所选附件")
+        input.use { source ->
+            FileOutputStream(canonicalTarget).use { output ->
+                val buffer = ByteArray(16 * 1024)
+                while (true) {
+                    val read = source.read(buffer)
+                    if (read < 0) break
+                    total += read
+                    require(total <= MAX_ATTACHMENT_FILE_BYTES) {
+                        "单个附件不能超过 20 MB：$displayName"
+                    }
+                    output.write(buffer, 0, read)
+                }
+                output.fd.sync()
+            }
+        }
+    } catch (error: Exception) {
+        canonicalTarget.delete()
+        throw error
+    }
+
+    val inputType = if (mimeType.startsWith("image/")) "localImage" else "mention"
+    return CodexPendingAttachment(
+        file = canonicalTarget,
+        displayName = displayName,
+        mimeType = mimeType,
+        inputType = inputType
+    )
+}
