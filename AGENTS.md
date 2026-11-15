@@ -1,6 +1,6 @@
 # Codex Agent 开发约束
 
-本文件是仓库内 Codex CLI、自动化 Agent 和人工开发者的长期项目指令。开始任何代码修改前必须先阅读本文件，并阅读 README.md、docs/ARCHITECTURE.md、docs/CLI-FEATURE-PARITY.md 和 docs/TERMINAL-PTY-ARCHITECTURE.md。
+本文件是仓库内 Codex CLI、自动化 Agent 和人工开发者的长期项目指令。开始任何代码修改前必须先阅读本文件，并阅读 README.md、docs/ARCHITECTURE.md、docs/CLI-FEATURE-PARITY.md、docs/TERMINAL-PTY-ARCHITECTURE.md 和 docs/ROOT-DEBUGGING-ARCHITECTURE.md。
 
 ## 项目唯一目标
 
@@ -10,7 +10,7 @@
 - Android UI 自己负责完整中文化，不依赖 CLI TUI 是否汉化。
 - 汉化版 Codex CLI 只能是可选构建变体，绝不能成为 APK 主线构建的强制依赖。
 - 优先使用固定版本、经过 schema 核对的 Codex App Server JSON-RPC/stdio 接口实现 Agent 图形界面；不得用解析 TUI 文本来冒充 Agent 协议。
-- 保留真正独立的 PTY 终端。Agent 通道与 Terminal 通道必须分离，不能共用 stdin/stdout。开发 PTY 前必须先阅读 `docs/TERMINAL-PTY-ARCHITECTURE.md`，处理 Termux/Operit 组件许可证，不得在许可证未确认前直接引入 GPL/LGPL 代码。
+- 保留真正独立的 PTY 终端。Agent 通道、普通 PTY 和 Root PTY 必须分离，不能共用 stdin/stdout。Root 是可选能力，只有用户主动申请并通过系统 Root 管理器授权后，才能启动独立 Root PTY；不得把整个 Codex Agent / App Server 提权运行。开发 PTY 前阅读 `docs/TERMINAL-PTY-ARCHITECTURE.md`，设计设备级调试时阅读 `docs/ROOT-DEBUGGING-ARCHITECTURE.md`。处理 Termux/Operit 组件许可证，不得在许可证未确认前直接引入 GPL/LGPL 代码。
 - 两个通道共享应用私有项目目录和必要配置，但不访问或修改用户已有 Termux、Codex 数据。
 - 第三方服务商必须按协议区分。Codex Agent 只接受经过验证的 Responses API 兼容服务商；Chat Completions、Anthropic Messages、Gemini 走独立通用聊天适配器。
 
@@ -19,7 +19,7 @@
 开发 Android 图形界面和周边管理能力时，必须主动参考并对照以下项目的公开实现与文档，不要闭门造车：
 
 - **OpenCode**（https://github.com/anomalyco/opencode）：重点研究会话/消息数据模型、事件流与状态归并、Agent/子 Agent、工具权限、MCP、Skills、自定义命令、项目配置和 worktree 工作流。借鉴产品结构和通用实现思路；Codex 执行仍通过本项目锁定版本的 Codex CLI / App Server，不混用 OpenCode 的执行协议。
-- **Operit**（https://github.com/AAswordman/Operit）：重点研究 Android 原生 Agent 工作台、任务与工具执行进度、附件和工作区上下文、文件/终端/浏览器集成、工作流、ToolPkg、MCP、Skills，以及移动端权限和用户确认体验。
+- **Operit**（https://github.com/AAswordman/Operit）：重点研究 Android 原生 Agent 工作台、任务与工具执行进度、附件和工作区上下文、文件/终端/浏览器集成、工作流、ToolPkg、MCP、Skills，以及普通 Shell、Shizuku / ADB、Root 和调试器通道的权限分层。
 - **RikkaHub**：重点研究服务商、模型、自定义 API 端点、请求头和 MCP 配置体验。
 
 每次新增相关功能前，先对照参考项目，写清楚借鉴点、Codex 接入方式和本项目的差异；不能照搬与 Codex 不兼容的协议，也不能把“参考”理解成直接复制代码。移植源码、资源、图标、文案或依赖前必须核查许可证、版权声明和兼容条件。参考项目的功能只能作为设计输入，不能在本项目未实现和未测试时宣称已经具备。
@@ -36,6 +36,8 @@
 - Agent Server 的 stdout 是 JSONL 协议专用通道，不能写入调试文本；stderr 和日志不得泄露 API Key、自定义 Header 值或认证配置。
 - API Key 和自定义 Header 值必须使用 Android Keystore 加密保存；写入 Codex 配置时优先使用环境变量引用，不能写入明文。
 - 服务端主动发起的审批请求必须由用户明确处理，不能默认放行。
+- Codex Agent 和普通 PTY 始终使用应用 UID。Root 只允许作为独立的可选 PTY / 受控工具通道；默认关闭、逐次授权、可撤销，不得把 API Key、App Server 或整个工作区 Agent 进程带入 root 身份。
+- 逆向和动态调试功能仅用于自有或明确授权的设备 / 应用；进程附加、内存访问、Hook、注入和系统写入必须明确展示目标并由用户审批。
 - UI、Runtime、CLI/App Server、完整 APK 和 Android 实机测试分别验收。
 - 任何尚未实现、未经协议验证或未经实机验证的功能都必须明确标记，不得宣称已完成。
 - 不要删除 codex-code-mode-host 等 CLI 必需 helper；不要把普通 Linux/glibc 二进制当成 Android/Bionic 可执行文件。
