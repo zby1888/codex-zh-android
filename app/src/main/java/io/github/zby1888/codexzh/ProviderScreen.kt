@@ -118,7 +118,7 @@ internal fun ProviderScreen(modifier: Modifier = Modifier) {
             )
             refresh()
             showEditor = false
-            message = "服务商配置已保存。连接测试和 Codex 配置同步仍待接入。"
+            message = "服务商配置已保存。设为 Agent 默认后，聊天页连接 Codex 时会应用这组配置；模型目录可在聊天页读取。中转站的实际协议兼容性仍需运行验证。"
         } catch (error: Exception) {
             message = error.message ?: "保存失败，请检查填写内容"
         }
@@ -234,7 +234,7 @@ internal fun ProviderScreen(modifier: Modifier = Modifier) {
                         modifier = Modifier.fillMaxWidth()
                     )
                     Text(
-                        "密钥和请求头值会使用 Android Keystore 加密保存。当前只保存配置，尚未执行连接测试或写入 Codex 配置。",
+                        "密钥和请求头值会使用 Android Keystore 加密保存。设为 Agent 默认后，Codex App Server 启动时会应用该服务商配置；连接与工具调用是否兼容仍需实际测试。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
