@@ -22,7 +22,7 @@
 | 沙盒和审批策略 | 项目设置 / 会话设置 | App Server 配置与线程参数 | 清楚显示权限边界；危险选项二次确认 |
 | 项目目录与工作区 | 项目选择器 | cwd、项目发现、私有 HOME | 已接入私有 `HOME/projects` 列表/创建/切换；聊天和终端共享路径，PTY 仍待实现 |
 | 项目指令文件 | 项目详情 | Codex 指令发现 / 文件查看 | 显示已加载的指令来源 |
-| MCP 服务 | MCP 管理 | config/batchWrite、config/mcpServer/reload、mcpServerStatus/list、mcpServer/oauthLogin | 已接入 STDIO / Streamable HTTP 新增、删除、状态/工具清单和 OAuth 浏览器授权入口；编辑、启停、HTTP 自定义 Header 与实机授权验证仍待实现 |
+| MCP 服务 | MCP 管理 | config/batchWrite、config/mcpServer/reload、mcpServerStatus/list、mcpServer/oauthLogin | 已接入 STDIO / Streamable HTTP 新增、删除、状态/工具清单和 OAuth 浏览器授权入口；Bearer Token 与自定义 HTTP Header 表单及环境变量映射已编码，等待 Build #103 编译验证；编辑、启停和实机授权验证仍待完成 |
 | MCP 工具调用 | 聊天工具卡片 | mcpServer/tool/call、工具事件 | 展示参数、进度、结果和审批 |
 | MCP OAuth / 表单询问 | 授权页 / 表单弹层 | mcpServer/oauth/login、elicitation | 可跳转授权并回到原会话 |
 | Skills | 技能管理 | skills 配置与可用的 App Server 方法 | 启停技能、显示来源；不伪造不可用能力 |
@@ -59,6 +59,8 @@
 3. 上游功能与 Codex 能力不一致的部分如何处理；
 4. 许可证和第三方依赖是否允许复用；
 5. 自动化测试与 Android 实机验收方式。
+
+真正 PTY 终端的模块、验收和许可证要求见 [TERMINAL-PTY-ARCHITECTURE.md](TERMINAL-PTY-ARCHITECTURE.md)。
 
 ## 必须保留的两个独立执行通道
 
