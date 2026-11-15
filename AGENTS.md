@@ -14,6 +14,16 @@
 - 两个通道共享应用私有项目目录和必要配置，但不访问或修改用户已有 Termux、Codex 数据。
 - 第三方服务商必须按协议区分。Codex Agent 只接受经过验证的 Responses API 兼容服务商；Chat Completions、Anthropic Messages、Gemini 走独立通用聊天适配器。
 
+## 开源项目参考要求
+
+开发 Android 图形界面和周边管理能力时，必须主动参考并对照以下项目的公开实现与文档，不要闭门造车：
+
+- **OpenCode**（https://github.com/anomalyco/opencode）：重点研究会话/消息数据模型、事件流与状态归并、Agent/子 Agent、工具权限、MCP、Skills、自定义命令、项目配置和 worktree 工作流。借鉴产品结构和通用实现思路；Codex 执行仍通过本项目锁定版本的 Codex CLI / App Server，不混用 OpenCode 的执行协议。
+- **Operit**（https://github.com/AAswordman/Operit）：重点研究 Android 原生 Agent 工作台、任务与工具执行进度、附件和工作区上下文、文件/终端/浏览器集成、工作流、ToolPkg、MCP、Skills，以及移动端权限和用户确认体验。
+- **RikkaHub**：重点研究服务商、模型、自定义 API 端点、请求头和 MCP 配置体验。
+
+每次新增相关功能前，先对照参考项目，写清楚借鉴点、Codex 接入方式和本项目的差异；不能照搬与 Codex 不兼容的协议，也不能把“参考”理解成直接复制代码。移植源码、资源、图标、文案或依赖前必须核查许可证、版权声明和兼容条件。参考项目的功能只能作为设计输入，不能在本项目未实现和未测试时宣称已经具备。
+
 ## 每次任务开始前
 
 1. 先查看当前分支、工作区状态、相关源码和现有测试，不要假设之前的任务已完成。
