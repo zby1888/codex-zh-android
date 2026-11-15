@@ -207,8 +207,8 @@ def main() -> None:
     dockerfile = dockerfile_path.read_text(encoding="utf-8")
     dockerfile = replace_once(
         dockerfile,
-        "apt-get update && \\\n\\tapt-get -yq upgrade && \\\n\\tapt-get install -yq sudo lsb-release software-properties-common && \\\n",
-        "apt-get update && \\\n\\tapt-get install -yq sudo lsb-release software-properties-common && \\\n",
+        "\tapt-get -yq upgrade && " + chr(92) + "\n",
+        "",
         "remove non-reproducible full host apt upgrade",
     )
     dockerfile = replace_once(
