@@ -89,6 +89,7 @@ internal class CodexChatUiState {
     var showRecentThreads by mutableStateOf(false)
     var showArchivedThreads by mutableStateOf(false)
     val recentThreads = mutableStateListOf<CodexThreadSummary>()
+    val mcpServers = mutableStateListOf<CodexMcpServerSummary>()
     val models = mutableStateListOf<CodexModelOption>()
     var selectedModelId by mutableStateOf<String?>(null)
     var selectedReasoningEffort by mutableStateOf<String?>(null)
@@ -98,6 +99,52 @@ internal class CodexChatUiState {
     var error by mutableStateOf<String?>(null)
     var pendingApproval by mutableStateOf<CodexPendingApproval?>(null)
     val entries = mutableStateListOf<CodexChatEntry>()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    val appServerListener = object : CodexAppServerClient.Listener {
+        override fun onNotification(message: JSONObject) {
+            mainHandler.post { applyNotification(message) }
+        }
+
+        override fun onServerRequest(message: JSONObject) {
+            val requestId = message.opt("id") ?: return
+            val method = message.optString("method")
+            val params = message.optJSONObject("params") ?: JSONObject()
+            mainHandler.post {
+                pendingApproval = CodexPendingApproval(requestId, method, params)
+                status = "Codex 正在等待你的操作确认"
+            }
+        }
+
+        override fun onDiagnostic(message: String) {
+            mainHandler.post { status = message }
+        }
+    }
+
+    fun replaceMcpServers(response: JSONObject) {
+        mcpServers.clear()
+        val data = response.optJSONArray("data") ?: return
+        for (index in 0 until data.length()) {
+            val server = data.optJSONObject(index) ?: continue
+            val name = server.optString("name")
+            if (name.isBlank()) continue
+            val toolObject = server.optJSONObject("tools")
+            val toolNames = mutableListOf<String>()
+            if (toolObject != null) {
+                val keys = toolObject.keys()
+                while (keys.hasNext()) toolNames.add(keys.next())
+            }
+            mcpServers.add(
+                CodexMcpServerSummary(
+                    name = name,
+                    runtimeStatus = server.optString("runtimeStatus").ifBlank { "unknown" },
+                    authStatus = server.optString("authStatus").ifBlank { "unknown" },
+                    httpOrigin = server.optString("httpOrigin"),
+                    toolNames = toolNames.sorted(),
+                    error = server.optString("toolsError").takeIf { it.isNotBlank() }
+                )
+            )
+        }
+    }
 
     fun closeInBackground() {
         val active = controller
@@ -404,28 +451,6 @@ internal fun CodexChatScreen(
     var archiveTarget by remember { mutableStateOf<CodexThreadSummary?>(null) }
     var deleteTarget by remember { mutableStateOf<CodexThreadSummary?>(null) }
     val handler = remember { Handler(Looper.getMainLooper()) }
-    val listener = remember(state, handler) {
-        object : CodexAppServerClient.Listener {
-            override fun onNotification(message: JSONObject) {
-                handler.post { state.applyNotification(message) }
-            }
-
-            override fun onServerRequest(message: JSONObject) {
-                val requestId = message.opt("id") ?: return
-                val method = message.optString("method")
-                val params = message.optJSONObject("params") ?: JSONObject()
-                handler.post {
-                    state.pendingApproval = CodexPendingApproval(requestId, method, params)
-                    state.status = "Codex 正在等待你的操作确认"
-                }
-            }
-
-            override fun onDiagnostic(message: String) {
-                handler.post { state.status = message }
-            }
-        }
-    }
-
     suspend fun ensureAgent(): CodexAgentController {
         state.controller?.takeIf { it.isConnected }?.let { return it }
         val runtime = withContext(Dispatchers.IO) { runtimeManager.inspect() }
@@ -436,7 +461,7 @@ internal fun CodexChatScreen(
             "还没有设置 Codex Agent 服务商。请先添加兼容 Responses API 的服务商。"
         }
         return withContext(Dispatchers.IO) {
-            CodexAgentRuntimeFactory(context).start(listener = listener)
+            CodexAgentRuntimeFactory(context).start(listener = state.appServerListener)
         }.also {
             state.controller = it
             state.status = "已连接 Codex App Server"
