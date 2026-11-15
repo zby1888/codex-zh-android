@@ -24,7 +24,7 @@ Root 管理器对授权的最终决定权高于 App 内的开关。用户可以�
 - 启动 Root PTY 前再次检查授权，避免只依赖上次打开页面时的旧状态。
 - Root 终端使用现有独立 PTY 与私有 Bash，工作目录限定在应用当前已验证的项目目录。
 - JNI 接口通过 argv 参数数组传递程序及参数，不把命令文本拆成可执行文件参数；Root 启动脚本只包含应用生成的路径，并对路径进行 shell quoting。
-- Root 启动链不继承 LD_PRELOAD，避免把 Termux exec helper 注入 root 进程；私有 PREFIX、HOME、CODEX_HOME 和项目目录仍明确设置。
+- Root 启动链不继承 LD_PRELOAD，也不把 CODEX_HOME / Agent 凭据带入 Root Shell；系统 su 先使用 Android 系统 PATH 和 Shell，只有 Root Bash 启动后才恢复私有 PREFIX、PATH 和 LD_LIBRARY_PATH。Root Shell 使用独立 .root-shell HOME 与独立历史文件。
 - 不保存“永久 Root 模式”，页面内开关只控制当前会话的启动身份；每次启用 Root 终端都重新校验。
 
 当前只完成 Root 授权探测、终端页入口和独立 Root PTY 启动接线。尚未完成 Android 真机上的 Magisk / KernelSU 兼容性、退出清理、SELinux 行为和长时间运行测试；**尚未把 Root 能力接入 Codex Agent 工具调用**。
@@ -54,6 +54,8 @@ Root 管理器对授权的最终决定权高于 App 内的开关。用户可以�
 - **设备级修改**：系统文件写入、模块安装、属性修改、服务启停和应用强制停止单独列为高风险权限，默认拒绝或每次明确询问，并支持停止与恢复说明。
 
 Root 并不等于无限制权限：SELinux、Android 版本、内核配置、厂商策略和目标进程隔离仍可能阻止 ptrace、内存访问或系统修改。不能因取得 UID 0 就把某项调试功能标记为必然可用。
+
+Root Shell 在项目工作区创建的文件通常会归 root 所有，普通应用 UID 可能无法再次修改。日常代码编辑、Git 操作和构建应优先交给普通 Codex Agent / 普通 PTY；Root 终端主要用于设备级调试。若确需 Root 写入项目，必须明确提示文件所有权变化，并由用户决定是否修复属主。
 
 ## 验收要求
 
