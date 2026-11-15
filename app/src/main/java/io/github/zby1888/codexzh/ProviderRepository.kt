@@ -112,7 +112,14 @@ internal class ProviderRepository(context: Context) {
         }
         val editor = preferences.edit()
         if (shouldBeDefault) editor.putString(DEFAULT_PROVIDER_KEY, config.id)
-        if (shouldBeCodexDefault) editor.putString(DEFAULT_CODEX_PROVIDER_KEY, config.id)
+        if (shouldBeCodexDefault) {
+            editor.putString(DEFAULT_CODEX_PROVIDER_KEY, config.id)
+        } else if (wasCodexDefault) {
+            val replacement = list().firstOrNull {
+                it.id != config.id && it.protocol == ProviderProtocol.CODEX_RESPONSES
+            }?.id
+            editor.putString(DEFAULT_CODEX_PROVIDER_KEY, replacement)
+        }
         editor.apply()
         return config.copy(
             displayName = config.displayName.trim(),
