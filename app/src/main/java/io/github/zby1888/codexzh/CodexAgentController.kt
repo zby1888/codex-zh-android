@@ -150,10 +150,47 @@ internal class CodexAgentController(
         return client.request("thread/turns/list", params)
     }
 
-    fun forkThread(threadId: String, turnId: String? = null): CodexThread {
+    fun listThreads(
+        archived: Boolean = false,
+        cursor: String? = null,
+        limit: Int? = null,
+        searchTerm: String? = null,
+        workingDirectory: String? = null
+    ): JSONObject {
+        val params = JSONObject().put("archived", archived)
+        if (!cursor.isNullOrBlank()) params.put("cursor", cursor)
+        if (limit != null) params.put("limit", limit)
+        if (!searchTerm.isNullOrBlank()) params.put("searchTerm", searchTerm)
+        if (!workingDirectory.isNullOrBlank()) params.put("cwd", workingDirectory)
+        return client.request("thread/list", params)
+    }
+
+    fun listItems(
+        threadId: String,
+        turnId: String? = null,
+        cursor: String? = null,
+        limit: Int? = null,
+        sortDirection: String = "asc"
+    ): JSONObject {
+        require(threadId.isNotBlank()) { "会话 ID 不能为空" }
+        val params = JSONObject()
+            .put("threadId", threadId)
+            .put("sortDirection", sortDirection)
+        if (!turnId.isNullOrBlank()) params.put("turnId", turnId)
+        if (!cursor.isNullOrBlank()) params.put("cursor", cursor)
+        if (limit != null) params.put("limit", limit)
+        return client.request("thread/items/list", params)
+    }
+
+    fun deleteThread(threadId: String) {
+        require(threadId.isNotBlank()) { "会话 ID 不能为空" }
+        client.request("thread/delete", JSONObject().put("threadId", threadId))
+    }
+
+    fun forkThread(threadId: String, lastTurnId: String? = null): CodexThread {
         require(threadId.isNotBlank()) { "会话 ID 不能为空" }
         val params = JSONObject().put("threadId", threadId)
-        if (!turnId.isNullOrBlank()) params.put("turnId", turnId)
+        if (!lastTurnId.isNullOrBlank()) params.put("lastTurnId", lastTurnId)
         val thread = client.request("thread/fork", params).optJSONObject("thread")
             ?: throw IllegalStateException("Codex App Server 没有返回分支会话信息")
         val id = thread.optString("id").takeIf { it.isNotBlank() }
