@@ -15,7 +15,7 @@
 - Agent 协议进程与交互式 PTY 终端分离；该类不得复用终端的 stdin/stdout。
 - 已接入基础聊天 UI：连接 `CodexAgentRuntimeFactory`、创建/列出/恢复会话、通过 `thread/items/list` 还原历史、发送用户消息、处理 `turn/start`、追加指令和中断轮次；UI 会接收 `item/agentMessage/delta`、命令输出增量、item 开始/完成、文件变更和 turn 完成事件，并显示对应卡片。已增加命令执行与文件修改审批卡片，未知服务端请求不会自动放行。
 - **尚未完成实机端到端验证**：当前代码构建不等于 Codex 进程已在 Android 私有运行时成功启动，也不等于第三方 Responses 中转站已经兼容。
-- 会话列表、最近/已归档切换、恢复、分支、重命名、归档/取消归档、删除的 UI 已接入；模型目录通过 `model/list` 动态读取，模型与推理强度会传入 `thread/start` / `turn/start`。项目选择器已加入：创建/列出应用私有 `HOME/projects` 内的工作区、切换后以新会话进入，旧会话保留在历史列表。聊天和终端页共享当前工作区路径。这些交互在 UI-only Build #75 的 Kotlin 编译和 APK 上传步骤已通过，但此构建没有包含 ARM64 Runtime，也没有完成实机 Agent 请求验证；历史分页、断线自动恢复、本地索引/收藏和跨进程状态恢复尚待实现。
+- 会话列表、最近/已归档切换、恢复、分支、重命名、归档/取消归档、删除的 UI 已接入；模型目录通过 `model/list` 动态读取，模型与推理强度会传入 `thread/start` / `turn/start`。项目选择器已加入：创建/列出应用私有 `HOME/projects` 内的工作区、切换后以新会话进入，旧会话保留在历史列表。聊天和终端页共享当前工作区路径。会话菜单新增 `/goal` 等价入口（目标、Token 预算、清除目标）、`/compact` 等价入口和未提交改动的代码审查入口；最新 UI 交互仍待 CI 和实机验证。这些交互在 UI-only Build #75 的 Kotlin 编译和 APK 上传步骤已通过，但此构建没有包含 ARM64 Runtime，也没有完成实机 Agent 请求验证；历史分页、断线自动恢复、本地索引/收藏和跨进程状态恢复尚待实现。
 - MCP 页面已从静态占位改为调用同一个 App Server 连接，刷新服务状态并显示连接/认证状态、HTTP Origin、工具清单和发现错误；已加入 STDIO / Streamable HTTP 添加表单、删除入口及 `config/batchWrite` 配置写入。MCP STDIO 环境变量与 HTTP Bearer Token 使用 Android Keystore 加密保存，并在 App Server 启动时注入；新增/删除密钥后提示重启进程以更新环境。OAuth 登录会调用 `mcpServer/oauthLogin`、校验 HTTPS 授权地址并打开系统浏览器，完成状态由 App Server 通知回传。
 - 已增加 `item/tool/requestUserInput` 动态问答卡片，支持选项、文本和密码型问题，并按协议 `answers` 对象响应。该代码仍待最新 UI CI 编译和 Android 实机验证。最新密钥注入、配置写入和 Diff 事件代码仍待 UI CI 编译验证，MCP OAuth、任意 HTTP Header、编辑表单、本地 STDIO 端到端工具调用及完整实机验收仍待实现。服务商管理和密钥注入底层已实现，但连接测试与真实中转站兼容性尚未验证。真正 PTY 终端仍待实现。
 
