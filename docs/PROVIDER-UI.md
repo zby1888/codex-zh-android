@@ -1,7 +1,7 @@
 # 服务商管理界面
 
 ## 已实现
-- 服务商列表与默认服务商切换。
+- 服务商列表与默认服务商切换，分别管理通用聊天默认服务商和 Codex Agent 默认服务商。
 - 添加、编辑和删除服务商。
 - 协议类型：Codex Agent Responses、OpenAI Chat Completions、Anthropic Messages、Google Gemini。
 - 配置名称、API 基础地址、模型 ID、API Key 和自定义请求头。
