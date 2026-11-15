@@ -89,9 +89,32 @@ def main() -> None:
     properties_path = source / "scripts/properties.sh"
     bootstrap_path = source / "scripts/build-bootstraps.sh"
     docker_runner_path = source / "scripts/run-docker.sh"
+    host_setup_path = source / "scripts/setup-ubuntu.sh"
+    dockerfile_path = source / "scripts/Dockerfile"
 
-    if not properties_path.is_file() or not bootstrap_path.is_file() or not docker_runner_path.is_file():
+    if not all(path.is_file() for path in (
+        properties_path, bootstrap_path, docker_runner_path, host_setup_path, dockerfile_path
+    )):
         raise SystemExit(f"Not a supported termux-packages checkout: {source}")
+
+    # Refuse package names that do not exist at the pinned Termux commit.
+    all_profiles = {"base": CONFIG["packages"], **CONFIG.get("optionalPackageProfiles", {})}
+    base_packages = set(CONFIG["packages"])
+    if len(CONFIG["packages"]) != len(base_packages):
+        raise SystemExit("Duplicate package in the base runtime profile")
+    for profile_name, profile_packages in all_profiles.items():
+        if len(profile_packages) != len(set(profile_packages)):
+            raise SystemExit(f"Duplicate package in runtime profile: {profile_name}")
+        if profile_name != "base" and base_packages.intersection(profile_packages):
+            raise SystemExit(f"Optional profile {profile_name} repeats base packages")
+        for package_name in profile_packages:
+            if not re.fullmatch(r"[a-z0-9][a-z0-9+.-]*", package_name):
+                raise SystemExit(f"Invalid Termux package name in {profile_name}: {package_name}")
+            if not (source / "packages" / package_name / "build.sh").is_file():
+                raise SystemExit(
+                    f"Package recipe not found at the pinned Termux commit: "
+                    f"{profile_name}/{package_name}"
+                )
 
     properties = properties_path.read_text(encoding="utf-8")
     properties = replace_once(
@@ -147,10 +170,54 @@ def main() -> None:
     bootstrap = replace_once(
         bootstrap,
         'mv -f "${BOOTSTRAP_TMPDIR}/bootstrap-${1}.zip" "$TERMUX_PACKAGES_DIRECTORY/"',
-        'mv -f "${BOOTSTRAP_TMPDIR}/bootstrap-${1}.zip" "$TERMUX_BUILT_DEBS_DIRECTORY/" || return $?',
-        "write bootstrap archive into the writable package output directory",
+        'mkdir -p "$TERMUX_PACKAGES_DIRECTORY/bootstrap-dist"\n\tmv -f "${BOOTSTRAP_TMPDIR}/bootstrap-${1}.zip" "$TERMUX_PACKAGES_DIRECTORY/bootstrap-dist/" || return $?',
+        "write bootstrap archive to a separate distribution directory",
     )
     bootstrap_path.write_text(bootstrap, encoding="utf-8")
+
+    # Reduce the Ubuntu Docker builder to the host tools needed by this
+    # Codex-only Android/Bionic package set. The full upstream host list also serves
+    # X11/GTK/Qt/Desktop/doc repositories and is intentionally not used here.
+    minimal_host_packages = (
+        "locales python-is-python3 curl gnupg git lzip tar unzip lrzip lzop lz4 zstd "
+        "fuse-overlayfs autoconf automake autopoint bison flex g++ g++-multilib gawk "
+        "gettext gperf intltool libglib2.0-dev libltdl-dev libtool-bin m4 pkg-config scons "
+        "python3-pip python3-setuptools python-wheel-common python3.14-venv python3-yaml "
+        "libssl-dev libclang-rt-17-dev libclang-rt-17-dev:i386 zip openssl zlib1g-dev "
+        "patchelf jq openjdk-17-jre openjdk-17-jdk"
+    )
+    host_setup = host_setup_path.read_text(encoding="utf-8")
+    host_marker = "# Do not require sudo if already running as root.\n"
+    host_override = (
+        "# Minimal host packages for this Codex-only Android/Bionic runtime.\n"
+        "if [[ \"${TERMUX_PRIVATE_RUNTIME_MINIMAL_BUILDER:-false}\" == \"true\" ]]; then\n"
+        f"    PACKAGES=\"{minimal_host_packages}\"\n"
+        "fi\n\n"
+    )
+    host_setup = replace_once(
+        host_setup,
+        host_marker,
+        host_override + host_marker,
+        "apply minimal host dependency list",
+    )
+    host_setup_path.write_text(host_setup, encoding="utf-8")
+
+    # Remove an unconditional host apt upgrade; the Ubuntu base and package
+    # setup are pinned by the Dockerfile and this recipe.
+    dockerfile = dockerfile_path.read_text(encoding="utf-8")
+    dockerfile = replace_once(
+        dockerfile,
+        "apt-get update && \\\n\\tapt-get -yq upgrade && \\\n\\tapt-get install -yq sudo lsb-release software-properties-common && \\\n",
+        "apt-get update && \\\n\\tapt-get install -yq sudo lsb-release software-properties-common && \\\n",
+        "remove non-reproducible full host apt upgrade",
+    )
+    dockerfile = replace_once(
+        dockerfile,
+        "su - builder -c \"TERMUX_PKGS__BUILD__IS_DOCKER_BUILD='true' /tmp/termux-packages/scripts/setup-ubuntu.sh\"",
+        "su - builder -c \"TERMUX_PRIVATE_RUNTIME_MINIMAL_BUILDER='true' TERMUX_PKGS__BUILD__IS_DOCKER_BUILD='true' /tmp/termux-packages/scripts/setup-ubuntu.sh\"",
+        "enable minimal host builder package set",
+    )
+    dockerfile_path.write_text(dockerfile, encoding="utf-8")
 
     # GitHub-hosted runners do not always expose AppArmor. Keep the upstream
     # seccomp profile and CAP_SYS_ADMIN/FUSE settings, but omit only the

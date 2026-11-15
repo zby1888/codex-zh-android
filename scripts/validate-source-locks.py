@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Reject floating source refs in the Android runtime lock file."""
 from pathlib import Path
+import json
 import re
 import sys
 
@@ -20,4 +21,22 @@ for name, body in entries:
         raise SystemExit(f"Floating ref is not allowed: {name} -> {value}")
     if not repository.group(1).startswith("https://github.com/"):
         raise SystemExit(f"Unexpected repository URL: {name}")
-print(f"Validated {len(entries)} pinned source entries.")
+config = json.loads((path.parent / "private-runtime-config.json").read_text(encoding="utf-8"))
+base = config.get("packages", [])
+profiles = config.get("optionalPackageProfiles", {})
+if not base or len(base) != len(set(base)):
+    raise SystemExit("Base runtime package list is empty or contains duplicates")
+if config.get("codexPackage") not in base:
+    raise SystemExit("Pinned Codex package must remain in the base runtime")
+if "ripgrep" not in base:
+    raise SystemExit("ripgrep must remain in the base runtime for code search")
+base_set = set(base)
+for profile_name, packages in profiles.items():
+    if len(packages) != len(set(packages)):
+        raise SystemExit(f"Duplicate package in optional profile: {profile_name}")
+    overlap = base_set.intersection(packages)
+    if overlap:
+        raise SystemExit(f"Optional profile {profile_name} duplicates base packages: {sorted(overlap)}")
+    if any(not re.fullmatch(r"[a-z0-9][a-z0-9+.-]*", package) for package in packages):
+        raise SystemExit(f"Invalid Termux package name in profile: {profile_name}")
+print(f"Validated {len(entries)} pinned source entries, {len(base)} base packages and {len(profiles)} optional profiles.")

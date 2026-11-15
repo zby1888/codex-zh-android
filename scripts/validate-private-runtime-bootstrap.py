@@ -92,7 +92,7 @@ def main() -> None:
             links[link] = target
 
         required = [
-            "bin/bash", "bin/env", "bin/git", "bin/jq",
+            "bin/bash", "bin/env", "bin/git", "bin/rg",
             "lib/libtermux-exec-ld-preload.so",
             f"bin/{CONFIG['codexPackage']}", f"bin/{CONFIG['codexHelper']}",
         ]
@@ -101,6 +101,15 @@ def main() -> None:
             raise SystemExit("Bootstrap is missing required runtime paths: " + ", ".join(missing))
         if CONFIG["codexPackage"] not in CONFIG["packages"]:
             raise SystemExit("Codex package is missing from private-runtime-config.json")
+        if "ripgrep" not in CONFIG["packages"]:
+            raise SystemExit("ripgrep must be present in the base profile for Codex code search")
+        base_packages = set(CONFIG["packages"])
+        for profile_name, profile_packages in CONFIG.get("optionalPackageProfiles", {}).items():
+            if len(profile_packages) != len(set(profile_packages)):
+                raise SystemExit(f"Duplicate package in optional profile: {profile_name}")
+            overlap = base_packages.intersection(profile_packages)
+            if overlap:
+                raise SystemExit(f"Optional profile {profile_name} duplicates base packages: {sorted(overlap)}")
         validate_aarch64_elf(zf, f"bin/{CONFIG['codexPackage']}")
         validate_aarch64_elf(zf, f"bin/{CONFIG['codexHelper']}")
 
@@ -122,6 +131,7 @@ def main() -> None:
         "codexVersion": CONFIG["codexVersion"],
         "codexSourceRef": locked_ref("codex"),
         "packages": CONFIG["packages"],
+        "optionalPackageProfiles": CONFIG.get("optionalPackageProfiles", {}),
         "archive": archive.name,
         "archiveSize": archive.stat().st_size,
         "sha256": digest,

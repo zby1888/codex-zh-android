@@ -24,6 +24,14 @@
 
 每次新增相关功能前，先对照参考项目，写清楚借鉴点、Codex 接入方式和本项目的差异；不能照搬与 Codex 不兼容的协议，也不能把“参考”理解成直接复制代码。移植源码、资源、图标、文案或依赖前必须核查许可证、版权声明和兼容条件。参考项目的功能只能作为设计输入，不能在本项目未实现和未测试时宣称已经具备。
 
+## Runtime 构建策略约束
+
+- 基础 bootstrap 只包含 `runtime/private-runtime-config.json` 的 `packages`；开发与逆向工具只能放在 `optionalPackageProfiles`，没有独立安装器和真机验证前不得加入基础包清单。
+- 不得直接使用按 `com.termux` 前缀制作的官方 Termux .deb 作为 `com.codex.zhou` 的运行时包。只有同 applicationId、PREFIX、架构和锁定版本下构建的本地包才可以复用。
+- Runtime 精确缓存必须同时保存私有 PREFIX、`/data/data/.built-packages` 版本标记、Termux 源码/构建目录、Cargo/Rustup 和对应输出 .deb；缓存键必须绑定 source lock、基础包配置和 prepare 脚本，不得用宽泛 restore key 混用不同 package profile。
+- Codex 和 `codex-code-mode-host` 继续使用固定 Termux recipe 源码编译；不得为降低构建时间删掉 helper 或拿 glibc 二进制代替 Bionic。
+- 纯 UI 变更不得触发昂贵的 Runtime 重建。Runtime 进行中不得因为同分支新提交自动取消；CI 必须保留磁盘、内存、cgroup OOM 和完整构建日志。
+
 ## 每次任务开始前
 
 1. 先查看当前分支、工作区状态、相关源码和现有测试，不要假设之前的任务已完成。

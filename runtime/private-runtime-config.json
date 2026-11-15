@@ -10,24 +10,20 @@
     "dash",
     "diffutils",
     "findutils",
-    "gawk",
     "grep",
     "gzip",
     "less",
-    "procps",
-    "psmisc",
+    "ripgrep",
     "sed",
     "tar",
     "util-linux",
     "git",
     "openssl",
     "ca-certificates",
-    "libcurl",
-    "jq",
     "termux-exec",
     "codex"
   ],
-  "notes": "Debug and release variants share the exact applicationId com.codex.zhou; the bootstrap is compiled for this package id. The private Codex runtime excludes termux-tools/termux-am app-launching helpers and disables Git GUI/gitk, git-svn and git-p4 integrations to avoid optional Tcl/Tk/X11, Perl/Subversion and Python build chains. Core Git, HTTPS remote operations, OpenSSL and libcurl remain enabled; Bash command-not-found integration is optional and guarded.",
+  "notes": "Base profile contains the shell, core file/search tools, Git/HTTPS, OpenSSL/CA, termux-exec, ripgrep, and official Codex CLI. Optional developer and reverseEngineering profiles are a catalog only; they are not included in the initial bootstrap and are not yet installable from the UI. Codex 0.169.0 and codex-code-mode-host remain built from pinned upstream source using the Android/Bionic Termux recipe. Official Termux .deb files built for com.termux paths are not relocatable into com.codex.zhou; only cached packages built with this exact applicationId, prefix, architecture, and pinned package profile may be reused.",
   "codexVersion": "0.169.0",
   "codexPackage": "codex",
   "codexHelper": "codex-code-mode-host",
@@ -35,5 +31,30 @@
     "termux-tools",
     "termux-am",
     "termux-am-socket"
-  ]
+  ],
+  "optionalPackageProfiles": {
+    "developer": [
+      "gawk",
+      "jq",
+      "procps",
+      "psmisc",
+      "patch",
+      "unzip",
+      "zip",
+      "python",
+      "nodejs",
+      "rust",
+      "cmake"
+    ],
+    "reverseEngineering": [
+      "apktool",
+      "binutils",
+      "dex2jar",
+      "gdb",
+      "radare2",
+      "apksigner",
+      "strace",
+      "ltrace"
+    ]
+  }
 }
