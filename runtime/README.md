@@ -36,7 +36,7 @@
 
 ## 构建机与容器优化
 
-专用 Docker builder 不再安装 Termux 全仓库所需的所有构建依赖。只保留当前 Codex 基础包构建所需的 Rust/C++/LLVM/NDK、Python、Git、解压、证书、Java 和包处理工具；X11/GTK/Qt、图形桌面、文档生成器、与当前包集合无关的其他仓库依赖不再安装到 builder。
+专用 Docker builder 不再安装 Termux 全仓库所需的所有构建依赖。只保留当前 Codex 基础包构建所需的 Rust/C++/LLVM/NDK、Python、Git、解压、证书、Java 和包处理工具；同时保留 GNU coreutils 编译时需要的 `texinfo`（提供 `makeinfo`）。其余文档生成器、X11/GTK/Qt、图形桌面和与当前包集合无关的仓库依赖仍不安装到 builder。
 
 CI 资源策略：
 
