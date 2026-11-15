@@ -30,6 +30,46 @@ internal class CodexMcpController(
     fun reloadConfiguration(): JSONObject =
         client.request("config/mcpServer/reload", JSONObject())
 
+    /**
+     * Adds or updates one MCP server in the private CODEX_HOME config.
+     * Server names are restricted so the quoted config key path is unambiguous.
+     * Secret values must never be placed in the config JSON; use process
+     * environment references managed by the encrypted credential store.
+     */
+    fun upsertServerConfig(serverName: String, config: JSONObject): JSONObject {
+        require(serverName.matches(Regex("[A-Za-z0-9_-]{1,64}"))) {
+            "MCP 服务名称只能包含英文字母、数字、下划线和连字符（最多 64 位）"
+        }
+        require(config.length() > 0) { "MCP 服务配置不能为空" }
+        val edits = JSONArray().put(
+            JSONObject()
+                .put("keyPath", "mcp_servers.\"$serverName\"")
+                .put("mergeStrategy", "upsert")
+                .put("value", config)
+        )
+        return client.request(
+            "config/batchWrite",
+            JSONObject().put("edits", edits).put("reloadUserConfig", true)
+        )
+    }
+
+    /** Removes one MCP server entry from the private Codex config. */
+    fun removeServerConfig(serverName: String): JSONObject {
+        require(serverName.matches(Regex("[A-Za-z0-9_-]{1,64}"))) {
+            "MCP 服务名称只能包含英文字母、数字、下划线和连字符（最多 64 位）"
+        }
+        val edits = JSONArray().put(
+            JSONObject()
+                .put("keyPath", "mcp_servers.\"$serverName\"")
+                .put("mergeStrategy", "replace")
+                .put("value", JSONObject.NULL)
+        )
+        return client.request(
+            "config/batchWrite",
+            JSONObject().put("edits", edits).put("reloadUserConfig", true)
+        )
+    }
+
     fun readResource(
         serverName: String,
         uri: String,
