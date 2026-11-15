@@ -302,9 +302,10 @@ private fun TerminalSurface(frame: TerminalFrame) {
                 val left = column * cellWidth
                 val top = row * cellHeight
                 if (background != null) {
-                    drawContext.canvas.drawRect(
-                        androidx.compose.ui.geometry.Rect(left, top, left + cellWidth * maxOf(1, cell.width), top + cellHeight),
-                        Color(android.graphics.Color.rgb((background shr 16) and 0xff, (background shr 8) and 0xff, background and 0xff))
+                    drawRect(
+                        color = Color(android.graphics.Color.rgb((background shr 16) and 0xff, (background shr 8) and 0xff, background and 0xff)),
+                        topLeft = androidx.compose.ui.geometry.Offset(left, top),
+                        size = androidx.compose.ui.geometry.Size(cellWidth * maxOf(1, cell.width), cellHeight)
                     )
                 }
                 paint.color = if (foreground == null) android.graphics.Color.rgb(226, 232, 240)
