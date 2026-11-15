@@ -43,6 +43,7 @@ internal fun CodexMcpScreen(
     val scope = rememberCoroutineScope()
     val runtimeManager = remember(context) { RuntimeManager(context) }
     val providerRepository = remember(context) { ProviderRepository(context) }
+    val secretRepository = remember(context) { McpServerSecretRepository(context) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -52,7 +53,9 @@ internal fun CodexMcpScreen(
     var command by remember { mutableStateOf("") }
     var argumentsText by remember { mutableStateOf("") }
     var workingDirectory by remember { mutableStateOf("") }
+    var environmentText by remember { mutableStateOf("") }
     var httpUrl by remember { mutableStateOf("") }
+    var bearerToken by remember { mutableStateOf("") }
     var deleteTarget by remember { mutableStateOf<String?>(null) }
 
     suspend fun ensureAgent(): CodexAgentController {
@@ -81,6 +84,7 @@ internal fun CodexMcpScreen(
 
     fun saveServer() {
         val cleanName = serverName.trim()
+        val secretValues = linkedMapOf<String, String>()
         val config = try {
             require(cleanName.matches(Regex("[A-Za-z0-9_-]{1,64}"))) {
                 "服务名称只能使用英文字母、数字、下划线和连字符（最多 64 位）"
@@ -92,6 +96,7 @@ internal fun CodexMcpScreen(
                     .map { it.trim() }
                     .filter { it.isNotEmpty() }
                     .toList()
+                parseEnvironmentLines(environmentText).also(secretValues::putAll)
                 val argsArray = org.json.JSONArray()
                 args.forEach { argsArray.put(it) }
                 val config = org.json.JSONObject()
@@ -106,6 +111,7 @@ internal fun CodexMcpScreen(
                     "远程 MCP 地址必须使用 HTTPS；仅本机回环地址允许 HTTP"
                 }
                 require(!uri.host.isNullOrBlank()) { "MCP 服务地址格式不正确" }
+                if (bearerToken.isNotBlank()) secretValues["BEARER_TOKEN"] = bearerToken
                 org.json.JSONObject().put("url", httpUrl.trim().trimEnd('/'))
             }
         } catch (failure: Exception) {
@@ -119,8 +125,25 @@ internal fun CodexMcpScreen(
             message = null
             try {
                 val agent = ensureAgent()
+                val envNames = withContext(Dispatchers.IO) {
+                    if (secretValues.isEmpty()) emptyMap()
+                    else secretRepository.saveValues(cleanName, secretValues)
+                }
+                if (transport == "stdio" && envNames.isNotEmpty()) {
+                    val envVars = org.json.JSONArray()
+                    envNames.values.forEach { envVars.put(it) }
+                    config.put("env_vars", envVars)
+                }
+                if (transport == "http") {
+                    envNames["BEARER_TOKEN"]?.let {
+                        config.put("bearer_token_env_var", it)
+                    }
+                }
                 withContext(Dispatchers.IO) {
                     agent.mcpController().upsertServerConfig(cleanName, config)
+                }
+                if (secretValues.isNotEmpty()) {
+                    state.needsAgentRestart = true
                 }
                 readServers(agent)
                 showAddDialog = false
@@ -128,8 +151,14 @@ internal fun CodexMcpScreen(
                 command = ""
                 argumentsText = ""
                 workingDirectory = ""
+                environmentText = ""
                 httpUrl = ""
-                message = "MCP 服务配置已保存。请检查连接状态和工具列表。"
+                bearerToken = ""
+                message = if (secretValues.isNotEmpty()) {
+                    "MCP 配置已保存。密钥已加密；重启 Codex 后新环境变量才会生效。"
+                } else {
+                    "MCP 服务配置已保存。请检查连接状态和工具列表。"
+                }
             } catch (failure: Exception) {
                 error = failure.message?.take(600) ?: "保存 MCP 配置失败"
             } finally {
@@ -148,8 +177,15 @@ internal fun CodexMcpScreen(
                 withContext(Dispatchers.IO) {
                     agent.mcpController().removeServerConfig(name)
                 }
+                val hadSecrets = secretRepository.environmentNames(name).isNotEmpty()
+                withContext(Dispatchers.IO) { secretRepository.removeServer(name) }
+                if (hadSecrets) state.needsAgentRestart = true
                 readServers(agent)
-                message = "已删除 MCP 服务：$name"
+                message = if (hadSecrets) {
+                    "已删除 MCP 服务：$name。旧凭据已从安全存储删除；重启 Codex 后会清除当前进程中的旧环境变量。"
+                } else {
+                    "已删除 MCP 服务：$name"
+                }
             } catch (failure: Exception) {
                 error = failure.message?.take(600) ?: "删除 MCP 服务失败"
             } finally {
@@ -229,6 +265,18 @@ internal fun CodexMcpScreen(
                             label = { Text("工作目录（可留空）") },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = environmentText,
+                            onValueChange = { environmentText = it },
+                            label = { Text("环境变量（每行 KEY=VALUE）") },
+                            minLines = 2,
+                            maxLines = 5,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Text(
+                            "环境变量值使用 Android Keystore 加密保存；Codex 启动子进程时才会注入。不要把密钥放进命令参数。",
+                            style = MaterialTheme.typography.bodySmall
                         )
                     } else {
                         OutlinedTextField(
@@ -318,6 +366,52 @@ internal fun CodexMcpScreen(
         }
         message?.let { Text(it, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall) }
 
+        if (state.needsAgentRestart) {
+            Card {
+                Column(
+                    Modifier.fillMaxWidth().padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text("需要重启 Codex", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "新增或删除 MCP 密钥后，只有重启私有 Codex 进程才能更新进程环境。重启会断开当前连接；会话可重新恢复。",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Button(
+                        onClick = {
+                            if (state.isWorking) return@Button
+                            scope.launch {
+                                busy = true
+                                error = null
+                                try {
+                                    val old = state.controller
+                                    state.controller = null
+                                    state.activeTurnId = null
+                                    state.isWorking = false
+                                    withContext(Dispatchers.IO) { old?.close() }
+                                    val agent = ensureAgent()
+                                    val threadId = state.threadId
+                                    if (!threadId.isNullOrBlank()) {
+                                        withContext(Dispatchers.IO) {
+                                            agent.resumeThread(threadId, state.workingDirectory)
+                                        }
+                                    }
+                                    state.needsAgentRestart = false
+                                    readServers(agent)
+                                    message = "Codex 已重新启动，MCP 凭据已重新加载"
+                                } catch (failure: Exception) {
+                                    error = failure.message?.take(600) ?: "重启 Codex 失败"
+                                } finally {
+                                    busy = false
+                                }
+                            }
+                        },
+                        enabled = !busy && !state.isWorking
+                    ) { Text(if (state.isWorking) "任务结束后再重启" else "重启 Codex 并重新连接") }
+                }
+            }
+        }
+
         if (state.mcpServers.isEmpty()) {
             Card {
                 Column(Modifier.fillMaxWidth().padding(16.dp)) {
@@ -391,3 +485,23 @@ private fun authStatusLabel(value: String): String = when (value) {
     "unsupported" -> "暂不支持"
     else -> "未知"
 }
+
+private fun parseEnvironmentLines(text: String): Map<String, String> {
+    val result = linkedMapOf<String, String>()
+    text.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.forEach { line ->
+        val separator = line.indexOf('=')
+        require(separator > 0) { "环境变量格式不正确：$line。请使用 KEY=VALUE" }
+        val key = line.substring(0, separator).trim()
+        val value = line.substring(separator + 1)
+        require(key.matches(Regex("[A-Za-z_][A-Za-z0-9_]{0,63}"))) {
+            "环境变量名称不合法：$key"
+        }
+        require(value.none { it == '\\r' || it == '\\n' }) {
+            "环境变量值不能包含换行符：$key"
+        }
+        require(!result.containsKey(key)) { "环境变量重复：$key" }
+        result[key] = value
+    }
+    return result
+}
+
