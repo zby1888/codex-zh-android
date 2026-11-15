@@ -110,11 +110,34 @@ std::vector<uint8_t> makeSnapshot(Terminal* terminal) {
 
 extern "C" JNIEXPORT jlong JNICALL
 Java_io_github_zby1888_codexzh_NativePtyBridge_nativeCreate(
-    JNIEnv* env,jobject,jstring shellValue,jstring cwdValue,
+    JNIEnv* env,jobject,jstring shellValue,jobjectArray argumentValues,jstring cwdValue,
     jobjectArray keys,jobjectArray values,jint rows,jint columns) {
     const std::string shell=fromJava(env,shellValue),cwd=fromJava(env,cwdValue);
     if(shell.empty()||cwd.empty()){throwState(env,"Shell 路径或工作目录为空");return 0;}
     if(rows<8||rows>80||columns<20||columns>160){throwState(env,"终端窗口大小不受支持");return 0;}
+
+    // Keep executable arguments as an argv vector. Never serialize user input
+    // into a shell command just to start a PTY child process.
+    if(!argumentValues){throwState(env,"Shell 启动参数为空");return 0;}
+    const jsize argumentCount=env->GetArrayLength(argumentValues);
+    if(argumentCount<1){throwState(env,"Shell 启动参数为空");return 0;}
+    std::vector<std::string> argumentStorage; argumentStorage.reserve(argumentCount);
+    for(jsize i=0;i<argumentCount;++i) {
+        auto value=static_cast<jstring>(env->GetObjectArrayElement(argumentValues,i));
+        const std::string argument=fromJava(env,value);
+        if(value)env->DeleteLocalRef(value);
+        if(argument.empty()||argument.find('\\0')!=std::string::npos) {
+            throwState(env,"Shell 启动参数包含不合法内容");return 0;
+        }
+        argumentStorage.push_back(argument);
+    }
+    if(argumentStorage.front()!=shell) {
+        throwState(env,"Shell 启动参数中的程序路径与可执行文件不一致");return 0;
+    }
+    std::vector<char*> argv; argv.reserve(argumentStorage.size()+1);
+    for(auto& argument:argumentStorage)argv.push_back(argument.data());
+    argv.push_back(nullptr);
+
     const jsize count=env->GetArrayLength(keys);
     if(count!=env->GetArrayLength(values)){throwState(env,"环境变量列表长度不一致");return 0;}
     std::vector<std::string> envStorage; envStorage.reserve(count);
@@ -163,8 +186,7 @@ Java_io_github_zby1888_codexzh_NativePtyBridge_nativeCreate(
         if(slave>STDERR_FILENO)close(slave);
         if(chdir(cwd.c_str())!=0)_exit(126);
         resetSignals();
-        char* argv[]={const_cast<char*>(shell.c_str()),const_cast<char*>("-i"),nullptr};
-        execve(shell.c_str(),argv,envp.data());_exit(127);
+        execve(shell.c_str(),argv.data(),envp.data());_exit(127);
     }
     close(slave);
     auto* terminal=new Terminal();
