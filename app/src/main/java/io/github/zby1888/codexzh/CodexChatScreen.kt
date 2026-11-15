@@ -568,22 +568,37 @@ internal fun CodexChatScreen(
             scope.launch {
                 state.isSubmitting = true
                 state.error = null
+                val imported = mutableListOf<CodexPendingAttachment>()
                 try {
-                    val imported = withContext(Dispatchers.IO) {
-                        require(selectedUris.size <= 10) { "一次最多选择 10 个附件" }
-                        var totalBytes = 0L
-                        selectedUris.map { uri ->
-                            copyAttachmentToPrivateFiles(context, uri).also { attachment ->
-                                totalBytes += attachment.file.length()
-                                require(totalBytes <= MAX_ATTACHMENT_BATCH_BYTES) {
-                                    "附件总大小不能超过 50 MB"
-                                }
-                            }
+                    val existing = state.pendingAttachments.toList()
+                    require(existing.size + selectedUris.size <= 10) {
+                        "待发送附件最多 10 个，请先移除一些附件"
+                    }
+                    require(existing.all { it.file.isFile }) {
+                        "有待发送附件已丢失，请移除后重新选择"
+                    }
+                    var totalBytes = existing.sumOf { it.file.length() }
+                    require(totalBytes <= MAX_ATTACHMENT_BATCH_BYTES) {
+                        "待发送附件总大小已超过 50 MB，请先移除一些附件"
+                    }
+                    for (uri in selectedUris) {
+                        val remainingBytes = MAX_ATTACHMENT_BATCH_BYTES - totalBytes
+                        require(remainingBytes > 0L) {
+                            "待发送附件总大小不能超过 50 MB"
                         }
+                        val maxBytes = minOf(MAX_ATTACHMENT_FILE_BYTES, remainingBytes)
+                        val attachment = withContext(Dispatchers.IO) {
+                            copyAttachmentToPrivateFiles(context, uri, maxBytes)
+                        }
+                        imported.add(attachment)
+                        totalBytes += attachment.file.length()
                     }
                     state.pendingAttachments.addAll(imported)
                     state.status = "已添加 ${imported.size} 个附件"
                 } catch (failure: Exception) {
+                    withContext(Dispatchers.IO) {
+                        imported.forEach { it.file.delete() }
+                    }
                     state.error = failure.message?.take(500) ?: "导入附件失败"
                 } finally {
                     state.isSubmitting = false
@@ -1743,7 +1758,11 @@ internal fun CodexChatScreen(
                             maxLines = 1
                         )
                         TextButton(
-                            onClick = { state.pendingAttachments.remove(attachment) },
+                            onClick = {
+                                if (state.pendingAttachments.remove(attachment)) {
+                                    scope.launch(Dispatchers.IO) { attachment.file.delete() }
+                                }
+                            },
                             enabled = !state.isSubmitting
                         ) { Text("移除") }
                     }
@@ -1826,8 +1845,10 @@ private fun buildCodexTurnInput(
 
 private fun copyAttachmentToPrivateFiles(
     context: Context,
-    uri: Uri
+    uri: Uri,
+    maxBytes: Long = MAX_ATTACHMENT_FILE_BYTES
 ): CodexPendingAttachment {
+    require(maxBytes in 1L..MAX_ATTACHMENT_FILE_BYTES) { "附件大小限制不正确" }
     val resolver = context.contentResolver
     val mimeType = resolver.getType(uri) ?: "application/octet-stream"
     val displayName = resolver.query(
@@ -1866,8 +1887,12 @@ private fun copyAttachmentToPrivateFiles(
                     val read = source.read(buffer)
                     if (read < 0) break
                     total += read
-                    require(total <= MAX_ATTACHMENT_FILE_BYTES) {
-                        "单个附件不能超过 20 MB：$displayName"
+                    require(total <= maxBytes) {
+                        if (maxBytes < MAX_ATTACHMENT_FILE_BYTES) {
+                            "附件总大小不能超过 50 MB"
+                        } else {
+                            "单个附件不能超过 20 MB：$displayName"
+                        }
                     }
                     output.write(buffer, 0, read)
                 }
