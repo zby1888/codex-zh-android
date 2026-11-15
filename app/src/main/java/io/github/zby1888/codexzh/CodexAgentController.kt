@@ -26,6 +26,8 @@ internal class CodexAgentController(
     private val client: CodexAppServerClient
 ) : Closeable {
 
+    val isConnected: Boolean get() = client.isInitialized
+
     fun connect(): JSONObject = client.connect()
 
     fun mcpController(): CodexMcpController = CodexMcpController(client)
