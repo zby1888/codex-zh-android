@@ -71,6 +71,16 @@ internal class CodexChatUiState {
     var pendingApproval by mutableStateOf<CodexPendingApproval?>(null)
     val entries = mutableStateListOf<CodexChatEntry>()
 
+    fun closeInBackground() {
+        val active = controller
+        controller = null
+        if (active != null) {
+            Thread({
+                runCatching { active.close() }
+            }, "codex-app-server-close").apply { isDaemon = true }.start()
+        }
+    }
+
     fun append(id: String, title: String, delta: String, isActivity: Boolean = false) {
         if (delta.isEmpty()) return
         val index = entries.indexOfFirst { it.id == id }
