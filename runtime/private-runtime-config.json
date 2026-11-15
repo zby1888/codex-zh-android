@@ -31,7 +31,6 @@
   "codexVersion": "0.169.0",
   "codexPackage": "codex",
   "codexHelper": "codex-code-mode-host",
-  "codexLocalizationPatchCount": 11,
   "excludedPackages": [
     "termux-tools",
     "termux-am",

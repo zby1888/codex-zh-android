@@ -35,17 +35,10 @@ jobs:
           ref: 1d8cc3f98c8a685f3a1475becbb0fe7d7dcda7fd
           path: vendor/termux-packages
 
-      - name: Checkout pinned Chinese Codex localization patches
-        uses: actions/checkout@v4
-        with:
-          repository: zby1888/codex-code-zh-cn
-          ref: 65a3e421cc67d9859b3eaecf26f859a806a9dded
-          path: vendor/codex-zh-cn
-
       - name: Configure custom application prefix
         run: |
           python3 -m py_compile scripts/prepare-private-runtime-source.py
-          python3 scripts/prepare-private-runtime-source.py vendor/termux-packages vendor/codex-zh-cn
+          python3 scripts/prepare-private-runtime-source.py vendor/termux-packages
           bash -n vendor/termux-packages/scripts/run-docker.sh
           bash -n vendor/termux-packages/scripts/build-bootstraps.sh
 
@@ -72,7 +65,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.termux-build
-          key: termux-private-runtime-ubuntu24-aarch64-${{ hashFiles('runtime/sources.lock.yml', 'runtime/private-runtime-config.json', 'scripts/prepare-private-runtime-source.py', 'vendor/codex-zh-cn/native/patches/codex/*.patch') }}
+          key: termux-private-runtime-ubuntu24-aarch64-${{ hashFiles('runtime/sources.lock.yml', 'runtime/private-runtime-config.json', 'scripts/prepare-private-runtime-source.py') }}
           restore-keys: |
             termux-private-runtime-ubuntu24-aarch64-
 

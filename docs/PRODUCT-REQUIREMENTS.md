@@ -1,7 +1,9 @@
 # 产品需求
 
 ## 定位
-独立 Android 客户端，提供终端与聊天双入口，将 Codex 智能体、第三方模型服务商和 MCP 工具纳入统一界面。
+独立 Android 客户端，目标是尽可能完整地把 Codex CLI 的主要能力搬进 Android 原生图形界面。官方 Codex CLI 负责 Agent 执行；App 负责图形化操作、会话和项目管理、执行过程展示、权限审批、MCP、模型配置和文件变更查看。终端是独立的真实 PTY 入口，不是聊天界面的替代品。
+
+汉化版 CLI 不是 APK 的必需依赖。主线使用固定版本的官方 Codex CLI；Android UI 自己维护完整中文文案。任何自动化 Agent 或后续开发者不得擅自改变这一项目定位。
 
 ## 平台
 - Android API 24+，优先验证 Android 14。
@@ -15,6 +17,12 @@
 - 服务商：协议、Base URL、API 密钥、模型 ID、自定义 Header、默认模型、连通性测试。
 - MCP：STDIO、Streamable HTTP、Bearer Token/OAuth、工具发现、逐工具审批和调用日志。
 - 配置导入：Codex TOML、OpenCode JSON、Operit JSON；RikkaHub 格式待核实具体版本。
+
+## 功能完整性原则
+- 按 [Codex CLI 功能对照表](CLI-FEATURE-PARITY.md) 逐项盘点、实现和验收，不把“有聊天页面”视为 CLI 能力移植完成。
+- 优先接入当前锁定版本公开且经过 Android 实测的 App Server 能力；不稳定或不可用的能力标明限制，并提供终端回退。
+- Agent 通道与 PTY 通道独立，二者共享项目目录和必要配置。
+- UI、Runtime、CLI/App Server、完整 APK 和实机测试分开验收。
 
 ## 非目标
 - 不修改现有 Termux 安装。
