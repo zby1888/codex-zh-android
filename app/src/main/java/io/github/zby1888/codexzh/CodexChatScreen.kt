@@ -1936,6 +1936,5 @@ internal fun CodexChatScreen(
     }
 }
 
-private fun defaultWorkspace
 private fun defaultWorkspace(home: File): String =
     CodexWorkspaceRepository(home).defaultWorkspace().canonicalPath
