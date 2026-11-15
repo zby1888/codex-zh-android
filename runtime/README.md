@@ -36,13 +36,13 @@
 
 ## 构建机与容器优化
 
-专用 Docker builder 不再安装 Termux 全仓库所需的所有构建依赖。只保留当前 Codex 基础包构建所需的 Rust/C++/LLVM/NDK、Python、Git、解压、证书、Java 和包处理工具；同时保留 GNU coreutils 编译时需要的 `texinfo`（提供 `makeinfo`）。其余文档生成器、X11/GTK/Qt、图形桌面和与当前包集合无关的仓库依赖仍不安装到 builder。
+Docker builder 直接使用锁定的 Termux Packages commit 自带的 `scripts/setup-ubuntu.sh` 完整主机依赖清单，不再手工猜测并删减一份精简清单。上游包配方可能调用 `makeinfo`、`gtkdocize` 等工具；漏掉它们会让基础包在运行到一半时失败。完整主机工具只安装在一次性的 Docker 构建镜像里，不会进入 APK 内置的 ARM64 bootstrap，也不会增加手机端运行环境体积。
 
 CI 资源策略：
 
 - 单包/单任务编译，Rust Cargo jobs = 1，禁用增量编译和 Thin LTO，降低 7.7 GiB Runner 上的峰值内存。
-- Cargo、Rustup、Termux source/build/cache、安装 PREFIX 和 `/data/data/.built-packages` 版本标记都放在 GitHub Actions 缓存卷中。
-- 使用 BuildKit GHA cache 保存 Docker builder 层，减少每轮重新安装 LLVM/NDK/Java 工具链的耗时。
+- Cargo、Rustup、Termux source/build/cache、安装 PREFIX 和 `/data/data/.built-packages` 版本标记都放在 GitHub Actions 缓存卷中。缓存按来源锁、包配置和补丁脚本隔离；每次运行使用新的快照键，并在成功或失败后保存已完成包标记与部分编译状态，下一轮从最近快照接着做。
+- Docker builder 只构建一次，并使用 BuildKit GHA cache 保存镜像层，避免重复构建后又覆盖带缓存的镜像。
 - 每 2 分钟采集宿主机/容器磁盘、内存、Docker 使用量和 cgroup OOM 事件；构建结束输出明确退出码和最后日志。
 - 私有 Runtime 工作流不因纯 UI 文件变更重跑；运行环境任务不因新提交直接取消正在执行的昂贵编译。
 
