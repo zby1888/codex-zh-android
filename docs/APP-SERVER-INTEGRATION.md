@@ -13,7 +13,9 @@
 - 已实现请求 ID 与响应关联、初始化握手、通知分发、服务端请求回调、服务端请求响应/拒绝、进程退出处理和连接关闭。
 - 已新增 `CodexAgentController`，封装 model/list、thread/start、thread/resume、thread/list、thread/turns/list、thread/items/list、thread/fork、thread/archive、thread/unarchive、thread/delete、turn/start、turn/steer 和 turn/interrupt。
 - Agent 协议进程与交互式 PTY 终端分离；该类不得复用终端的 stdin/stdout。
-- 尚未接入聊天 UI、审批界面、MCP 管理 UI、会话存储或真实 Android 设备端到端测试。MCP 协议操作层已建立，但配置编辑、审批交互和本地 STDIO MCP 运行时仍待实现。服务商管理界面和配置注入底层已实现，但连接测试与真实第三方中转站兼容性尚未验证。当前仍不能视为完整 Agent 功能。
+- 已接入基础聊天 UI：连接 `CodexAgentRuntimeFactory`、创建会话、发送用户消息、处理 `turn/start`、追加指令和中断轮次；UI 会接收 `item/agentMessage/delta`、命令输出增量、item 开始/完成、文件变更和 turn 完成事件，并显示对应卡片。已增加命令执行与文件修改审批卡片，未知服务端请求不会自动放行。
+- **尚未完成实机端到端验证**：当前代码构建不等于 Codex 进程已在 Android 私有运行时成功启动，也不等于第三方 Responses 中转站已经兼容。
+- 会话列表、历史恢复、断线恢复和本地持久化尚待接入 UI；MCP 协议操作层已建立，但配置编辑、完整审批交互和本地 STDIO MCP 运行时仍待实现。服务商管理和密钥注入底层已实现，但连接测试与真实中转站兼容性尚未验证。真正 PTY 终端仍待实现。
 
 ## 协议握手
 
@@ -36,7 +38,7 @@
 
 1. 在 ARM64 私有运行时实际启动该版本 App Server，验证 initialize / initialized 往返。
 2. 生成并保存该版本的 JSON Schema，作为 Kotlin 请求/事件解析的版本依据。
-3. 接入 model/list、thread/start、turn/start、turn/interrupt、thread/turns/list。
-4. 建立统一的事件模型，把 agentMessage delta、command execution、file change、MCP、approval 等事件映射为 UI 状态。
+3. 已在聊天 UI 接入基本的 model/thread/turn 控制路径；下一步补齐 thread/list、resume、history item hydration 和本地会话索引。
+4. 已把 agentMessage delta、command output、item lifecycle、file change、turn completion 和初步 approval request 映射为 UI 状态；下一步补齐事件去重、历史恢复和完整审批类型。
 5. 实现 thread 生命周期持久化、断线重连和进程恢复。
 6. 在 Android 14 实机上验证第三方 Responses 兼容中转站；不能以 HTTP 200 代替完整协议兼容测试。
