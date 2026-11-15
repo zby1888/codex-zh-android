@@ -53,7 +53,7 @@ internal class RuntimeManager(context: Context) {
             marker.getProperty("abi") == "arm64-v8a" &&
             marker.getProperty("applicationId") == paths.appPackageName &&
             paths.bash.isFile && paths.env.exists() && paths.git.exists() &&
-            paths.jq.exists() && paths.execPreload.isFile
+            paths.execPreload.isFile
 
         if (!baseRuntimeInstalled) {
             return RuntimeStatus(
