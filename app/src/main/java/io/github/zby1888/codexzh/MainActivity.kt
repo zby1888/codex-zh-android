@@ -106,6 +106,10 @@ private fun TerminalScreen(
     var desiredRows by remember { mutableIntStateOf(24) }
     var desiredColumns by remember { mutableIntStateOf(80) }
     val scope = rememberCoroutineScope()
+    val rootAccessManager = remember(context) { RootAccessManager(context) }
+    var rootStatus by remember { mutableStateOf(RootAccessStatus.notChecked()) }
+    var requestingRoot by remember { mutableStateOf(false) }
+    var useRootShell by remember { mutableStateOf(false) }
     val workspaceRepository = remember(manager) { CodexWorkspaceRepository(manager.paths.home) }
     val currentWorkspace = remember(chatState.workingDirectory, manager) {
         chatState.workingDirectory ?: workspaceRepository.defaultWorkspace().canonicalPath
@@ -184,7 +188,13 @@ private fun TerminalScreen(
                                     val validated = withContext(Dispatchers.IO) {
                                         workspaceRepository.validate(java.io.File(currentWorkspace)).canonicalPath
                                     }
-                                    terminal.start(validated, desiredRows, desiredColumns)
+                                    val suPath = if (useRootShell) {
+                                        check(rootStatus.isGranted && !rootStatus.suPath.isNullOrBlank()) {
+                                            "Root 尚未通过系统授权，请先申请 Root 权限"
+                                        }
+                                        rootStatus.suPath
+                                    } else null
+                                    terminal.start(validated, desiredRows, desiredColumns, rootSuPath = suPath)
                                 } catch (error: Exception) {
                                     status = status.copy(message = error.message ?: "启动 PTY 终端失败")
                                 } finally {
@@ -197,11 +207,63 @@ private fun TerminalScreen(
                     ) { Text(if (terminal.isRunning) "结束终端" else "启动真实终端") }
                 }
                 Text(
-                    if (terminal.isRunning) "PTY 已连接 · " + terminal.workingDirectory.orEmpty() else terminal.message,
+                    if (terminal.isRunning) {
+                        (if (terminal.isRootSession) "Root PTY 已连接 · " else "PTY 已连接 · ") +
+                            terminal.workingDirectory.orEmpty()
+                    } else terminal.message,
                     style = MaterialTheme.typography.labelSmall,
                     color = if (terminal.isRunning) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+        }
+
+        Card {
+            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text("Root 调试通道", modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (rootStatus.isGranted) "已授权" else "默认关闭",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (rootStatus.isGranted) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Text(rootStatus.message, style = MaterialTheme.typography.bodySmall)
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            requestingRoot = true
+                            try {
+                                rootStatus = rootAccessManager.requestAccess()
+                                if (!rootStatus.isGranted) useRootShell = false
+                            } finally {
+                                requestingRoot = false
+                            }
+                        }
+                    },
+                    enabled = !requestingRoot && !terminal.isRunning
+                ) {
+                    Text(if (requestingRoot) "正在等待 Root 管理器…" else "申请 / 重新检查 Root 授权")
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("本次终端使用 Root 身份", fontWeight = FontWeight.Medium)
+                        Text(
+                            "只影响手动启动的这个终端；Codex Agent 和普通终端仍使用应用普通身份。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = useRootShell,
+                        onCheckedChange = { useRootShell = it },
+                        enabled = rootStatus.isGranted && !terminal.isRunning
+                    )
+                }
             }
         }
 
