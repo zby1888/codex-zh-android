@@ -150,7 +150,7 @@ internal class CodexChatUiState {
                                 "localImage", "image" -> add("[图片附件]")
                             }
                         }
-                    }.filter { it.isNotBlank() }.joinToString("\\n")
+                    }.filter { it.isNotBlank() }.joinToString("\n")
                     if (text.isNotBlank()) upsert("history:user:$id", "你", text)
                 }
                 "agentMessage" -> {
@@ -160,10 +160,10 @@ internal class CodexChatUiState {
                 "commandExecution" -> {
                     val text = buildString {
                         append(item.optString("command"))
-                        append("\\n目录：").append(item.optString("cwd"))
-                        append("\\n状态：").append(item.optString("status"))
+                        append("\n目录：").append(item.optString("cwd"))
+                        append("\n状态：").append(item.optString("status"))
                         val output = item.optString("aggregatedOutput")
-                        if (output.isNotBlank()) append("\\n\\n").append(output)
+                        if (output.isNotBlank()) append("\n\n").append(output)
                     }
                     upsert("history:command:$id", "命令执行", text, true)
                 }
@@ -177,12 +177,12 @@ internal class CodexChatUiState {
                             }
                         }
                     }.filter { it.isNotBlank() }
-                    upsert("history:file:$id", "文件修改", paths.joinToString("\\n"), true)
+                    upsert("history:file:$id", "文件修改", paths.joinToString("\n"), true)
                 }
                 "mcpToolCall" -> upsert(
                     "history:mcp:$id",
                     "MCP 工具",
-                    "${item.optString("server")} / ${item.optString("tool")}\\n状态：${item.optString("status")}",
+                    "${item.optString("server")} / ${item.optString("tool")}\n状态：${item.optString("status")}",
                     true
                 )
                 "plan" -> upsert("history:plan:$id", "执行计划", item.optString("text"), true)
@@ -497,6 +497,27 @@ internal fun CodexChatScreen(
         }
     }
 
+    fun rejectUnsupportedRequest() {
+        val pending = state.pendingApproval ?: return
+        val agent = state.controller ?: return
+        if (pending.supported) return
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    agent.rejectServerRequest(
+                        pending.requestId,
+                        -32601,
+                        "当前 Android 客户端暂不支持此请求，已安全拒绝"
+                    )
+                }
+                state.pendingApproval = null
+                state.status = "已拒绝当前不支持的请求"
+            } catch (error: Exception) {
+                state.error = error.message ?: "拒绝请求失败"
+            }
+        }
+    }
+
     Column(
         modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -540,14 +561,35 @@ internal fun CodexChatScreen(
                         },
                         style = MaterialTheme.typography.bodySmall
                     )
-                    val detail = pending.params.optString("reason")
-                        .ifBlank { pending.params.optString("command") }
+                    val detail = buildString {
+                        val reason = pending.params.optString("reason")
+                        val command = pending.params.optString("command")
+                        val cwd = pending.params.optString("cwd")
+                        if (reason.isNotBlank()) append(reason)
+                        if (command.isNotBlank()) {
+                            if (isNotEmpty()) append("\n")
+                            append("命令：").append(command)
+                        }
+                        if (cwd.isNotBlank()) {
+                            if (isNotEmpty()) append("\n")
+                            append("工作目录：").append(cwd)
+                        }
+                    }
                     if (detail.isNotBlank()) Text(detail, style = MaterialTheme.typography.bodySmall)
                     if (pending.supported) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(onClick = { answerApproval("accept") }) { Text("允许一次") }
                             OutlinedButton(onClick = { answerApproval("acceptForSession") }) { Text("本会话允许") }
                             TextButton(onClick = { answerApproval("decline") }) { Text("拒绝") }
+                        }
+                    } else {
+                        Text(
+                            "当前版本还不能处理这种请求。为避免智能体一直等待，可以安全拒绝它。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        OutlinedButton(onClick = { rejectUnsupportedRequest() }) {
+                            Text("拒绝这个请求")
                         }
                     }
                 }
