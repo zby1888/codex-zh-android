@@ -30,6 +30,28 @@ if config.get("codexPackage") not in base:
     raise SystemExit("Pinned Codex package must remain in the base runtime")
 if "ripgrep" not in base:
     raise SystemExit("ripgrep must remain in the base runtime for code search")
+
+required_base = {
+    "bash", "coreutils", "git", "openssl", "ca-certificates",
+    "ripgrep", "termux-exec", config.get("codexPackage"),
+}
+missing_base = sorted(required_base.difference(base_set))
+if missing_base:
+    raise SystemExit(f"Missing required base runtime packages: {missing_base}")
+
+app_gradle = (path.parent.parent / "app" / "build.gradle.kts").read_text(encoding="utf-8")
+application_id = re.search(r'applicationId\\s*=\\s*"([^"]+)"', app_gradle)
+if not application_id or application_id.group(1) != config.get("appPackageName"):
+    raise SystemExit("Android applicationId does not match private runtime prefix configuration")
+
+runtime_manager = (path.parent.parent / "app" / "src" / "main" / "java" / "io" / "github" / "zby1888" / "codexzh" / "RuntimeManager.kt").read_text(encoding="utf-8")
+installer = (path.parent.parent / "app" / "src" / "main" / "java" / "io" / "github" / "zby1888" / "codexzh" / "RuntimeBootstrapInstaller.kt").read_text(encoding="utf-8")
+version = re.search(r'EXPECTED_CODEX_VERSION\\s*=\\s*"([^"]+)"', runtime_manager)
+if not version or version.group(1) != config.get("codexVersion"):
+    raise SystemExit("Android runtime version check does not match the pinned Codex package version")
+
+if "jq" not in base_set and ("paths.jq.exists()" in runtime_manager or "paths.jq" in installer):
+    raise SystemExit("Optional jq package is incorrectly treated as a base runtime requirement")
 base_set = set(base)
 for profile_name, packages in profiles.items():
     if len(packages) != len(set(packages)):
