@@ -50,6 +50,13 @@ internal data class CodexChatEntry(
     val isActivity: Boolean = false
 )
 
+internal data class CodexThreadSummary(
+    val id: String,
+    val title: String,
+    val preview: String,
+    val workingDirectory: String
+)
+
 internal data class CodexPendingApproval(
     val requestId: Any,
     val method: String,
@@ -63,7 +70,10 @@ internal data class CodexPendingApproval(
 internal class CodexChatUiState {
     var controller by mutableStateOf<CodexAgentController?>(null)
     var threadId by mutableStateOf<String?>(null)
+    var workingDirectory by mutableStateOf<String?>(null)
     var activeTurnId by mutableStateOf<String?>(null)
+    var showRecentThreads by mutableStateOf(false)
+    val recentThreads = mutableStateListOf<CodexThreadSummary>()
     var isWorking by mutableStateOf(false)
     var isSubmitting by mutableStateOf(false)
     var status by mutableStateOf("尚未连接 Codex")
@@ -97,6 +107,87 @@ internal class CodexChatUiState {
         val next = if (index < 0) CodexChatEntry(id, title, text, isActivity = isActivity)
         else entries[index].copy(title = title, text = text, isActivity = isActivity)
         if (index < 0) entries.add(next) else entries[index] = next
+    }
+
+    fun replaceRecentThreads(response: JSONObject) {
+        recentThreads.clear()
+        val data = response.optJSONArray("data") ?: return
+        for (index in 0 until data.length()) {
+            val thread = data.optJSONObject(index) ?: continue
+            val id = thread.optString("id")
+            if (id.isBlank()) continue
+            val preview = thread.optString("preview")
+            val title = thread.optString("name").ifBlank { preview }.ifBlank { "未命名会话" }
+            recentThreads.add(
+                CodexThreadSummary(
+                    id = id,
+                    title = title,
+                    preview = preview,
+                    workingDirectory = thread.optString("cwd")
+                )
+            )
+        }
+    }
+
+    fun restoreHistory(response: JSONObject) {
+        entries.clear()
+        val data = response.optJSONArray("data") ?: return
+        for (index in 0 until data.length()) {
+            val entry = data.optJSONObject(index) ?: continue
+            val item = entry.optJSONObject("item") ?: continue
+            val id = item.optString("id")
+            if (id.isBlank()) continue
+            when (item.optString("type")) {
+                "userMessage" -> {
+                    val content = item.optJSONArray("content") ?: continue
+                    val text = buildList {
+                        for (contentIndex in 0 until content.length()) {
+                            val part = content.optJSONObject(contentIndex) ?: continue
+                            when (part.optString("type")) {
+                                "text" -> add(part.optString("text"))
+                                "skill" -> add("[技能：${part.optString("name")}]")
+                                "mention" -> add("@${part.optString("name")}")
+                                "localImage", "image" -> add("[图片附件]")
+                            }
+                        }
+                    }.filter { it.isNotBlank() }.joinToString("\\n")
+                    if (text.isNotBlank()) upsert("history:user:$id", "你", text)
+                }
+                "agentMessage" -> {
+                    val text = item.optString("text")
+                    if (text.isNotBlank()) upsert("history:assistant:$id", "Codex", text)
+                }
+                "commandExecution" -> {
+                    val text = buildString {
+                        append(item.optString("command"))
+                        append("\\n目录：").append(item.optString("cwd"))
+                        append("\\n状态：").append(item.optString("status"))
+                        val output = item.optString("aggregatedOutput")
+                        if (output.isNotBlank()) append("\\n\\n").append(output)
+                    }
+                    upsert("history:command:$id", "命令执行", text, true)
+                }
+                "fileChange" -> {
+                    val changes = item.optJSONArray("changes")
+                    val paths = buildList {
+                        if (changes != null) {
+                            for (changeIndex in 0 until changes.length()) {
+                                val change = changes.optJSONObject(changeIndex) ?: continue
+                                add(change.optString("path"))
+                            }
+                        }
+                    }.filter { it.isNotBlank() }
+                    upsert("history:file:$id", "文件修改", paths.joinToString("\\n"), true)
+                }
+                "mcpToolCall" -> upsert(
+                    "history:mcp:$id",
+                    "MCP 工具",
+                    "${item.optString("server")} / ${item.optString("tool")}\\n状态：${item.optString("status")}",
+                    true
+                )
+                "plan" -> upsert("history:plan:$id", "执行计划", item.optString("text"), true)
+            }
+        }
     }
 
     fun applyNotification(message: JSONObject) {
@@ -250,6 +341,78 @@ internal fun CodexChatScreen(
         }
     }
 
+    suspend fun ensureAgent(): CodexAgentController {
+        state.controller?.takeIf { it.isConnected }?.let { return it }
+        val runtime = withContext(Dispatchers.IO) { runtimeManager.inspect() }
+        check(runtime.phase == RuntimePhase.RUNTIME_READY) {
+            "Codex 私有运行环境尚未就绪：${runtime.message}"
+        }
+        check(providerRepository.getDefaultCodexAgent() != null) {
+            "还没有设置 Codex Agent 服务商。请先添加兼容 Responses API 的服务商。"
+        }
+        return withContext(Dispatchers.IO) {
+            CodexAgentRuntimeFactory(context).start(listener = listener)
+        }.also {
+            state.controller = it
+            state.status = "已连接 Codex App Server"
+        }
+    }
+
+    fun refreshThreads() {
+        scope.launch {
+            state.isSubmitting = true
+            state.error = null
+            try {
+                val agent = ensureAgent()
+                val response = withContext(Dispatchers.IO) { agent.listThreads(limit = 30) }
+                state.replaceRecentThreads(response)
+                state.showRecentThreads = true
+            } catch (error: Exception) {
+                state.error = error.message?.take(600) ?: "读取会话列表失败"
+            } finally {
+                state.isSubmitting = false
+            }
+        }
+    }
+
+    fun resumeThread(summary: CodexThreadSummary) {
+        scope.launch {
+            state.isSubmitting = true
+            state.error = null
+            try {
+                val agent = ensureAgent()
+                val resumed = withContext(Dispatchers.IO) {
+                    agent.resumeThread(summary.id, summary.workingDirectory)
+                }
+                val history = withContext(Dispatchers.IO) {
+                    agent.listItems(resumed.id, limit = 100, sortDirection = "asc")
+                }
+                state.threadId = resumed.id
+                state.workingDirectory = summary.workingDirectory
+                state.activeTurnId = null
+                state.isWorking = false
+                state.restoreHistory(history)
+                state.showRecentThreads = false
+                state.status = "已恢复会话"
+            } catch (error: Exception) {
+                state.error = error.message?.take(600) ?: "恢复会话失败"
+            } finally {
+                state.isSubmitting = false
+            }
+        }
+    }
+
+    fun startNewConversation() {
+        state.threadId = null
+        state.workingDirectory = null
+        state.activeTurnId = null
+        state.isWorking = false
+        state.entries.clear()
+        state.pendingApproval = null
+        state.showRecentThreads = false
+        state.status = "准备开始新会话"
+    }
+
     fun connectAndSend(text: String) {
         if (state.isSubmitting || text.isBlank()) return
         scope.launch {
@@ -262,30 +425,16 @@ internal fun CodexChatScreen(
                 isUser = true
             ))
             try {
-                val agent = state.controller ?: run {
-                    val runtime = withContext(Dispatchers.IO) { runtimeManager.inspect() }
-                    check(runtime.phase == RuntimePhase.RUNTIME_READY) {
-                        "Codex 私有运行环境尚未就绪：${runtime.message}"
-                    }
-                    check(providerRepository.getDefaultCodexAgent() != null) {
-                        "还没有设置 Codex Agent 服务商。请先添加兼容 Responses API 的服务商。"
-                    }
-                    withContext(Dispatchers.IO) {
-                        CodexAgentRuntimeFactory(context).start(listener = listener)
-                    }.also {
-                        state.controller = it
-                        state.status = "已连接 Codex App Server"
-                    }
-                }
-
+                val agent = ensureAgent()
                 val threadId = state.threadId ?: run {
-                    val workingDirectory = withContext(Dispatchers.IO) {
-                        defaultWorkspace(runtimeManager.paths.home)
+                    val cwd = withContext(Dispatchers.IO) {
+                        state.workingDirectory ?: defaultWorkspace(runtimeManager.paths.home)
                     }
                     withContext(Dispatchers.IO) {
-                        agent.startThread(workingDirectory).id
+                        agent.startThread(cwd).id
                     }.also {
                         state.threadId = it
+                        state.workingDirectory = cwd
                         state.status = "已创建新会话"
                     }
                 }
@@ -297,16 +446,17 @@ internal fun CodexChatScreen(
                     }
                     state.status = "已把补充指令发送给 Codex"
                 } else {
-                    val workingDirectory = defaultWorkspace(runtimeManager.paths.home)
-                    val turn = withContext(Dispatchers.IO) {
-                        agent.startTurn(threadId, text, workingDirectory)
-                    }
-                    state.activeTurnId = turn.id
+                    val cwd = state.workingDirectory ?: defaultWorkspace(runtimeManager.paths.home)
                     state.isWorking = true
-                    state.status = "已发送，正在等待 Codex 回复"
+                    val turn = withContext(Dispatchers.IO) {
+                        agent.startTurn(threadId, text, cwd)
+                    }
+                    if (state.isWorking) state.activeTurnId = turn.id
+                    state.status = if (state.isWorking) "已发送，正在等待 Codex 回复" else state.status
                 }
             } catch (error: Exception) {
                 state.isWorking = false
+                state.activeTurnId = null
                 state.error = error.message?.take(600) ?: "连接 Codex 时发生未知错误"
                 state.status = "操作未完成"
             } finally {
@@ -411,6 +561,53 @@ internal fun CodexChatScreen(
                         Spacer(Modifier.height(4.dp))
                         Text(entry.text, style = MaterialTheme.typography.bodyMedium)
                     }
+                }
+            }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = { refreshThreads() }, enabled = !state.isSubmitting) {
+                Text("历史会话")
+            }
+            TextButton(onClick = { startNewConversation() }, enabled = !state.isSubmitting) {
+                Text("新建会话")
+            }
+            state.workingDirectory?.let {
+                Text(it.substringAfterLast('/'), style = MaterialTheme.typography.labelSmall)
+            }
+        }
+        if (state.showRecentThreads) {
+            Card {
+                Column(
+                    Modifier.fillMaxWidth().padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text("最近会话", fontWeight = FontWeight.SemiBold)
+                    if (state.recentThreads.isEmpty()) {
+                        Text("还没有可恢复的会话", style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        LazyColumn(Modifier.height(180.dp)) {
+                            items(state.recentThreads, key = { it.id }) { summary ->
+                                TextButton(
+                                    onClick = { resumeThread(summary) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = !state.isSubmitting
+                                ) {
+                                    Column(Modifier.fillMaxWidth()) {
+                                        Text(summary.title, maxLines = 1)
+                                        if (summary.workingDirectory.isNotBlank()) {
+                                            Text(
+                                                summary.workingDirectory,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    TextButton(onClick = { state.showRecentThreads = false }) { Text("收起") }
                 }
             }
         }
