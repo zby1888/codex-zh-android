@@ -1,5 +1,6 @@
 package io.github.zby1888.codexzh
 
+import android.os.Build
 import org.json.JSONException
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -55,7 +56,7 @@ internal class CodexAppServerClient(
     @Volatile private var initialized = false
 
     val isAlive: Boolean
-        get() = !closed.get() && process?.isAlive == true
+        get() = !closed.get() && process?.let { isProcessRunning(it) } == true
 
     val isInitialized: Boolean
         get() = initialized && isAlive
@@ -238,6 +239,13 @@ internal class CodexAppServerClient(
         }
     }
 
+    private fun isProcessRunning(child: Process): Boolean = try {
+        child.exitValue()
+        false
+    } catch (_: IllegalThreadStateException) {
+        true
+    }
+
     private fun failPending(error: Throwable) {
         pending.values.forEach { it.completeExceptionally(error) }
         pending.clear()
@@ -253,7 +261,7 @@ internal class CodexAppServerClient(
 
         val child = process
         process = null
-        if (child != null && child.isAlive) {
+        if (child != null && isProcessRunning(child)) {
             child.destroy()
             var finished = false
             val waiter = Thread {
@@ -270,7 +278,10 @@ internal class CodexAppServerClient(
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
             }
-            if (!finished) child.destroyForcibly()
+            if (!finished) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) child.destroyForcibly()
+                else child.destroy()
+            }
         }
         io.shutdownNow()
     }
