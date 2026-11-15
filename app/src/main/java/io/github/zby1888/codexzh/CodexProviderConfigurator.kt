@@ -55,6 +55,12 @@ internal class CodexProviderConfigurator(
                     .put("mergeStrategy", "replace")
                     .put("value", provider.id)
             )
+            .put(
+                JSONObject()
+                    .put("keyPath", "model")
+                    .put("mergeStrategy", "replace")
+                    .put("value", provider.modelId)
+            )
 
         return client.request(
             "config/batchWrite",
