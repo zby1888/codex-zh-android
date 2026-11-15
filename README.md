@@ -37,6 +37,7 @@ GitHub Actions 会构建 Debug APK 并上传为 Actions Artifact。
 
 - [产品需求](docs/PRODUCT-REQUIREMENTS.md)
 - [架构](docs/ARCHITECTURE.md)
+- [Codex App Server 接入设计](docs/APP-SERVER-INTEGRATION.md)
 - [模型服务商](docs/PROVIDER-PROTOCOLS.md)
 - [MCP](docs/MCP-CONFIG.md)
 - [Codex CLI 功能对照表](docs/CLI-FEATURE-PARITY.md)
