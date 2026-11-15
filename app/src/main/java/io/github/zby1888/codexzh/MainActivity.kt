@@ -62,9 +62,7 @@ private fun CodexZhApp() {
                 Tab.Chat -> CodexChatScreen(Modifier.padding(padding), chatState) { tab = Tab.Providers }
                 Tab.Terminal -> TerminalScreen(Modifier.padding(padding))
                 Tab.Providers -> ProviderScreen(Modifier.padding(padding))
-                Tab.Mcp -> ListScreen(Modifier.padding(padding), "MCP 工具",
-                    "目标支持远程 Streamable HTTP 与本地 STDIO MCP 服务。",
-                    listOf("服务列表与连接测试", "工具发现和调用进度", "允许 / 拒绝 / 每次询问", "导入 Codex、OpenCode、Operit 配置"))
+                Tab.Mcp -> CodexMcpScreen(Modifier.padding(padding), chatState) { tab = Tab.Providers }
             }
         }
     }
