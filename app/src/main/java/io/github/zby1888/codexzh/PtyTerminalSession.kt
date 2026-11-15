@@ -117,10 +117,16 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
     fun stop() {
         val current=handle
         if(current==0L)return
-        handle=0L; readerJob?.cancel(); readerJob=null; isRunning=false
+        handle=0L
+        val reader=readerJob
+        readerJob=null
+        reader?.cancel()
+        isRunning=false
         message="正在关闭终端会话…"
-        Thread({runCatching{bridge.nativeClose(current)}},"codex-private-pty-close")
-            .apply{isDaemon=true}.start()
+        cleanupScope.launch {
+            reader?.join()
+            nativeMutex.withLock { runCatching { bridge.nativeClose(current) } }
+        }
     }
     fun closeInBackground(){stop();scope.cancel()}
 
