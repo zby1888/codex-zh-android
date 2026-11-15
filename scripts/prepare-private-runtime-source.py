@@ -176,12 +176,13 @@ def main() -> None:
     bootstrap_path.write_text(bootstrap, encoding="utf-8")
 
     # Reduce the Ubuntu Docker builder to the host tools needed by this
-    # Codex-only Android/Bionic package set. The full upstream host list also serves
-    # X11/GTK/Qt/Desktop/doc repositories and is intentionally not used here.
+    # Codex-only Android/Bionic package set. Keep texinfo because GNU coreutils
+    # invokes makeinfo during its normal build; omit other documentation generators
+    # and X11/GTK/Qt/Desktop repository dependencies.
     minimal_host_packages = (
         "locales python-is-python3 curl gnupg git lzip tar unzip lrzip lzop lz4 zstd "
         "fuse-overlayfs autoconf automake autopoint bison flex g++ g++-multilib gawk "
-        "gettext gperf intltool libglib2.0-dev libltdl-dev libtool-bin m4 pkg-config scons "
+        "gettext gperf texinfo intltool libglib2.0-dev libltdl-dev libtool-bin m4 pkg-config scons "
         "python3-pip python3-setuptools python-wheel-common python3.14-venv python3-yaml "
         "libssl-dev libclang-rt-17-dev libclang-rt-17-dev:i386 zip openssl zlib1g-dev "
         "patchelf jq openjdk-17-jre openjdk-17-jdk"
