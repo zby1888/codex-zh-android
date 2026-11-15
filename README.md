@@ -23,6 +23,16 @@
 - 技术栈：Kotlin + Jetpack Compose
 - 私有目录：独立 `PREFIX`、`HOME`、`CODEX_HOME`，不访问 Termux 私有目录，不覆盖原有 `~/.codex`
 
+## 开源项目参考
+
+除 Codex 官方 CLI / App Server 外，开发时明确参考以下开源项目的成熟设计：
+
+- **OpenCode**（[anomalyco/opencode](https://github.com/anomalyco/opencode)）：参考会话生命周期与历史、事件驱动的消息/工具状态、Agent 与子 Agent、权限策略、MCP、Skills、自定义命令、项目工作区和 Git worktree 等设计。执行协议仍以本项目锁定版本的 Codex App Server 为准，不直接把 OpenCode runtime 当成 Codex runtime。
+- **Operit**（[AAswordman/Operit](https://github.com/AAswordman/Operit)）：参考 Android 优先的 Agent 工作台、任务进度、附件与工作区上下文、工具执行卡片、Android 文件/终端/浏览器能力、工作流、ToolPkg、MCP 和 Skills 管理。只借鉴适合本项目的交互与模块设计，不把 Operit 的 Agent 执行引擎替换 Codex。
+- **RikkaHub**：参考多服务商、多模型、自定义端点和请求头、配置管理及 MCP 入口；具体实现以核验后的上游版本和许可证为准。
+
+参考项目是设计和交互参考，不代表可以直接复制代码。任何代码、资源、协议适配或文案移植前，必须检查许可证、依赖许可证、来源和兼容性，并保留必要的版权声明。
+
 ## 构建 UI 骨架
 
 需要 JDK 17、Android SDK 35、Gradle 8.10.2：
