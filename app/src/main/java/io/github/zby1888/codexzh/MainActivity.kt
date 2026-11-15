@@ -71,7 +71,7 @@ private fun CodexZhApp() {
             bottomBar = {
                 if (tab != Tab.Chat) {
                     NavigationBar {
-                        Tab.entries.filter { it != Tab.Chat }.forEach { item ->
+                        Tab.entries.forEach { item ->
                             NavigationBarItem(
                                 selected = tab == item,
                                 onClick = { tab = item },
