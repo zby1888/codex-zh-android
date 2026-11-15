@@ -695,6 +695,30 @@ internal fun CodexChatScreen(
         }
     }
 
+    fun reviewUncommittedChanges() {
+        val threadId = state.threadId ?: return
+        if (state.isWorking || state.isSubmitting) return
+        scope.launch {
+            state.isSubmitting = true
+            state.error = null
+            try {
+                val agent = ensureAgent()
+                withContext(Dispatchers.IO) {
+                    agent.startReview(
+                        threadId,
+                        JSONObject().put("type", "uncommittedChanges")
+                    )
+                }
+                state.status = "已启动代码审查：暂存、未暂存和未跟踪文件"
+                state.isWorking = true
+            } catch (error: Exception) {
+                state.error = error.message?.take(600) ?: "启动代码审查失败"
+            } finally {
+                state.isSubmitting = false
+            }
+        }
+    }
+
     fun openGoalEditor() {
         val threadId = state.threadId ?: return
         if (state.isSubmitting || state.isWorking) return
@@ -1233,6 +1257,14 @@ internal fun CodexChatScreen(
                         onClick = {
                             actionsMenuExpanded = false
                             compactCurrentThread()
+                        },
+                        enabled = !state.isWorking
+                    )
+                    DropdownMenuItem(
+                        text = { Text("审查未提交改动") },
+                        onClick = {
+                            actionsMenuExpanded = false
+                            reviewUncommittedChanges()
                         },
                         enabled = !state.isWorking
                     )
