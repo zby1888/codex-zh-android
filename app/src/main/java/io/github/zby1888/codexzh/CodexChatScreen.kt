@@ -1152,7 +1152,7 @@ internal fun CodexChatScreen(
                     )
                     OutlinedTextField(
                         value = goalBudget,
-                        onValueChange = { goalBudget = it.filter(Char::isDigit).take(12) },
+                        onValueChange = { goalBudget = it.filter { char -> char.isDigit() }.take(12) },
                         label = { Text("Token 预算（可留空）") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
