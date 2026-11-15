@@ -86,7 +86,8 @@ libvterm 仅是 VT parser，不负责创建 PTY，也不是现成 Android Termin
 - executable 为已检测到的 su 绝对路径；argv 为 su、-c 和应用生成的固定启动脚本。
 - 脚本先切换到已校验的项目目录，再导出私有 PREFIX / HOME 等环境，最后 exec 私有 Bash。
 - 启动脚本里的路径必须 shell-quote；不得将聊天内容、模型输出或任意用户命令拼入 su 启动脚本。
-- 启动 su 时不传 LD_PRELOAD；不要把 API Key、自定义 Header 或 App Server 进程环境交给 Root shell。
+- 启动 su 时不传 LD_PRELOAD / 私有 LD_LIBRARY_PATH；Root Bash 启动后才恢复需要的私有库路径。不要把 CODEX_HOME、API Key、自定义 Header 或 App Server 进程环境交给 Root Shell；Root Shell 使用独立 HOME 和历史文件。
+- Root 在项目目录中创建或修改的文件可能归 root 所有，普通应用 UID 后续可能无法编辑。日常写代码和构建使用普通 Agent / PTY；Root 终端主要用于设备级调试。
 - Root 授权不能跨会话视为永久有效；每次新建 Root PTY 前重新校验。
 - Root PTY 进程必须独立跟踪并停止；应用退出或用户关闭会话时清理其进程组。
 
