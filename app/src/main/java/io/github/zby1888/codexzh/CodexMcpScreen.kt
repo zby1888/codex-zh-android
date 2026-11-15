@@ -496,7 +496,7 @@ private fun parseEnvironmentLines(text: String): Map<String, String> {
         require(key.matches(Regex("[A-Za-z_][A-Za-z0-9_]{0,63}"))) {
             "环境变量名称不合法：$key"
         }
-        require(value.none { it == '\\r' || it == '\\n' }) {
+        require(value.none { it == '\r' || it == '\n' }) {
             "环境变量值不能包含换行符：$key"
         }
         require(!result.containsKey(key)) { "环境变量重复：$key" }
