@@ -71,6 +71,13 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
         } else {
             val su = File(rootSuPath!!)
             check(su.isFile && su.canExecute()) { "Root 管理器提供的 su 路径已不可用，请重新申请授权" }
+            // Keep root shell state separate from the normal app user and Codex credentials.
+            val rootHome = File(paths.home, ".root-shell")
+            check(rootHome.isDirectory || rootHome.mkdirs()) { "无法创建独立 Root Shell 主目录" }
+            environment["HOME"] = rootHome.absolutePath
+            environment["TERMUX__HOME"] = rootHome.absolutePath
+            environment["HISTFILE"] = File(rootHome, ".bash_history").absolutePath
+            environment.remove("CODEX_HOME")
             // Keep the system su binary away from the private runtime loader paths.
             // The private library path is restored only inside the root-owned Bash command.
             environment.remove("LD_PRELOAD")
@@ -81,10 +88,10 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
             val exportedKeys = listOf(
                 "PREFIX", "TERMUX_PREFIX", "TERMUX__PREFIX", "TERMUX__ROOTFS",
                 "TERMUX__HOME", "TERMUX_ANDROID_HOME", "TERMUX_APP__PACKAGE_NAME",
-                "HOME", "CODEX_HOME", "TMPDIR", "TERM", "LANG", "LC_ALL"
+                "HOME", "HISTFILE", "TMPDIR", "TERM", "LANG", "LC_ALL"
             )
             val rootCommand = buildString {
-                append("cd -- ").append(shellQuote(cwd.absolutePath)).append(" && ")
+                append("cd -- ").append(shellQuote(cwd.absolutePath)).append(" || exit 126; ")
                 exportedKeys.forEach { key ->
                     environment[key]?.let { value ->
                         append("export ").append(key).append('=').append(shellQuote(value)).append("; ")
@@ -92,7 +99,7 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
                 }
                 append("export PATH=").append(shellQuote(privatePath)).append("; ")
                 append("export SHELL=").append(shellQuote(paths.bash.absolutePath)).append("; ")
-                append("unset LD_PRELOAD; export LD_LIBRARY_PATH=")
+                append("unset CODEX_HOME LD_PRELOAD; export LD_LIBRARY_PATH=")
                     .append(shellQuote(privateLibraryPath)).append("; ")
                 append("export PS1='root@codex:\\w# '; exec ")
                     .append(shellQuote(paths.bash.absolutePath)).append(" -i")
