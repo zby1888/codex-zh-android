@@ -107,6 +107,7 @@ internal class CodexChatUiState {
     var status by mutableStateOf("尚未连接 Codex")
     var error by mutableStateOf<String?>(null)
     var pendingApproval by mutableStateOf<CodexPendingApproval?>(null)
+    var needsAgentRestart by mutableStateOf(false)
     val entries = mutableStateListOf<CodexChatEntry>()
     private val mainHandler = Handler(Looper.getMainLooper())
     val appServerListener = object : CodexAppServerClient.Listener {
