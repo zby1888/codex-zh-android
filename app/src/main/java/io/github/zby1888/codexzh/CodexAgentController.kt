@@ -28,6 +28,14 @@ internal class CodexAgentController(
 
     fun connect(): JSONObject = client.connect()
 
+    fun mcpController(): CodexMcpController = CodexMcpController(client)
+
+    fun respondToServerRequest(requestId: Any, result: JSONObject) =
+        client.respond(requestId, result)
+
+    fun rejectServerRequest(requestId: Any, code: Int, message: String, data: Any? = null) =
+        client.respondError(requestId, code, message, data)
+
     fun listModels(
         modelProvider: String? = null,
         includeHidden: Boolean = false,
