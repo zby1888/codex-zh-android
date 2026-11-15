@@ -1,6 +1,6 @@
 # Codex Agent 开发约束
 
-本文件是仓库内 Codex CLI、自动化 Agent 和人工开发者的长期项目指令。开始任何代码修改前必须先阅读本文件，并阅读 README.md、docs/ARCHITECTURE.md 和 docs/CLI-FEATURE-PARITY.md。
+本文件是仓库内 Codex CLI、自动化 Agent 和人工开发者的长期项目指令。开始任何代码修改前必须先阅读本文件，并阅读 README.md、docs/ARCHITECTURE.md、docs/CLI-FEATURE-PARITY.md 和 docs/TERMINAL-PTY-ARCHITECTURE.md。
 
 ## 项目唯一目标
 
@@ -10,7 +10,7 @@
 - Android UI 自己负责完整中文化，不依赖 CLI TUI 是否汉化。
 - 汉化版 Codex CLI 只能是可选构建变体，绝不能成为 APK 主线构建的强制依赖。
 - 优先使用固定版本、经过 schema 核对的 Codex App Server JSON-RPC/stdio 接口实现 Agent 图形界面；不得用解析 TUI 文本来冒充 Agent 协议。
-- 保留真正独立的 PTY 终端。Agent 通道与 Terminal 通道必须分离，不能共用 stdin/stdout。
+- 保留真正独立的 PTY 终端。Agent 通道与 Terminal 通道必须分离，不能共用 stdin/stdout。开发 PTY 前必须先阅读 `docs/TERMINAL-PTY-ARCHITECTURE.md`，处理 Termux/Operit 组件许可证，不得在许可证未确认前直接引入 GPL/LGPL 代码。
 - 两个通道共享应用私有项目目录和必要配置，但不访问或修改用户已有 Termux、Codex 数据。
 - 第三方服务商必须按协议区分。Codex Agent 只接受经过验证的 Responses API 兼容服务商；Chat Completions、Anthropic Messages、Gemini 走独立通用聊天适配器。
 
