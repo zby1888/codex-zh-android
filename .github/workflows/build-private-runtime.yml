@@ -4,14 +4,17 @@ on:
   push:
     branches: [main]
     paths:
-      - "runtime/**"
+      - "runtime/sources.lock.yml"
+      - "runtime/private-runtime-config.json"
       - "scripts/prepare-private-runtime-source.py"
       - "scripts/validate-private-runtime-bootstrap.py"
       - ".github/workflows/build-private-runtime.yml"
+  # Documentation-only edits under runtime/ do not start the multi-hour ARM64 build.
   pull_request:
     branches: [main]
     paths:
-      - "runtime/**"
+      - "runtime/sources.lock.yml"
+      - "runtime/private-runtime-config.json"
       - "scripts/prepare-private-runtime-source.py"
       - "scripts/validate-private-runtime-bootstrap.py"
       - ".github/workflows/build-private-runtime.yml"
