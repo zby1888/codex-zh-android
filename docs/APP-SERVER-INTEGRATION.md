@@ -16,7 +16,8 @@
 - 已接入基础聊天 UI：连接 `CodexAgentRuntimeFactory`、创建/列出/恢复会话、通过 `thread/items/list` 还原历史、发送用户消息、处理 `turn/start`、追加指令和中断轮次；UI 会接收 `item/agentMessage/delta`、命令输出增量、item 开始/完成、文件变更和 turn 完成事件，并显示对应卡片。已增加命令执行与文件修改审批卡片，未知服务端请求不会自动放行。
 - **尚未完成实机端到端验证**：当前代码构建不等于 Codex 进程已在 Android 私有运行时成功启动，也不等于第三方 Responses 中转站已经兼容。
 - 会话列表、最近/已归档切换、恢复、分支、重命名、归档/取消归档、删除的 UI 已接入；模型目录通过 `model/list` 动态读取，模型与推理强度会传入 `thread/start` / `turn/start`。这些交互在 UI-only Build #75 的 Kotlin 编译和 APK 上传步骤已通过，但此构建没有包含 ARM64 Runtime，也没有完成实机 Agent 请求验证；历史分页、断线自动恢复、本地索引/收藏和跨进程状态恢复尚待实现。
-- MCP 页面已从静态占位改为调用同一个 App Server 连接，刷新服务状态并显示连接/认证状态、HTTP Origin、工具清单和发现错误；已加入 STDIO / Streamable HTTP 添加表单、删除入口及 `config/batchWrite` 配置写入。MCP STDIO 环境变量与 HTTP Bearer Token 使用 Android Keystore 加密保存，并在 App Server 启动时注入；新增/删除密钥后提示重启进程以更新环境。最新密钥注入、配置写入和 Diff 事件代码仍待 UI CI 编译验证，MCP OAuth、任意 HTTP Header、编辑表单、本地 STDIO 端到端工具调用及完整实机验收仍待实现。服务商管理和密钥注入底层已实现，但连接测试与真实中转站兼容性尚未验证。真正 PTY 终端仍待实现。
+- MCP 页面已从静态占位改为调用同一个 App Server 连接，刷新服务状态并显示连接/认证状态、HTTP Origin、工具清单和发现错误；已加入 STDIO / Streamable HTTP 添加表单、删除入口及 `config/batchWrite` 配置写入。MCP STDIO 环境变量与 HTTP Bearer Token 使用 Android Keystore 加密保存，并在 App Server 启动时注入；新增/删除密钥后提示重启进程以更新环境。
+- 已增加 `item/tool/requestUserInput` 动态问答卡片，支持选项、文本和密码型问题，并按协议 `answers` 对象响应。该代码仍待最新 UI CI 编译和 Android 实机验证。最新密钥注入、配置写入和 Diff 事件代码仍待 UI CI 编译验证，MCP OAuth、任意 HTTP Header、编辑表单、本地 STDIO 端到端工具调用及完整实机验收仍待实现。服务商管理和密钥注入底层已实现，但连接测试与真实中转站兼容性尚未验证。真正 PTY 终端仍待实现。
 
 ## 协议握手
 
@@ -40,6 +41,6 @@
 1. 在 ARM64 私有运行时实际启动该版本 App Server，验证 initialize / initialized 往返。
 2. 生成并保存该版本的 JSON Schema，作为 Kotlin 请求/事件解析的版本依据。
 3. 已在聊天 UI 接入 model/thread/turn 控制路径、thread/list、resume 和基础 history item hydration；下一步补齐分页、本地会话索引、收藏/搜索和断线恢复。
-4. 已把 agentMessage delta、command output、plan delta、reasoning summary、MCP progress、item lifecycle、file change patch update、turn/diff/updated、turn completion 和初步 approval request 映射为 UI 状态；不支持的服务端请求可显式拒绝而不会自动放行。下一步补齐事件去重、历史恢复和权限/用户输入/elicitation 等审批类型。
+4. 已把 agentMessage delta、command output、plan delta、reasoning summary、MCP progress、item lifecycle、file change patch update、turn/diff/updated、turn completion、tool request user input 和初步 approval request 映射为 UI 状态；不支持的服务端请求可显式拒绝而不会自动放行。下一步补齐事件去重、历史恢复和权限/用户输入/elicitation 等审批类型。
 5. 实现 thread 生命周期持久化、断线重连和进程恢复。
 6. 在 Android 14 实机上验证第三方 Responses 兼容中转站；不能以 HTTP 200 代替完整协议兼容测试。
