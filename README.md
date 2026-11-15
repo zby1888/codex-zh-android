@@ -4,7 +4,7 @@
 
 ## 项目定位（长期约束）
 
-**请所有后续开发者、自动化 Agent 和 Codex CLI 在开始修改前先阅读本节及 [架构约束](docs/ARCHITECTURE.md)。**
+**请所有后续开发者、自动化 Agent 和 Codex CLI 在开始修改前先阅读 [AGENTS.md](AGENTS.md)、本节及 [架构约束](docs/ARCHITECTURE.md)。**
 
 - **Agent 核心**：优先使用固定版本的官方 Codex CLI 和经过版本核验的 App Server / JSON-RPC 接口。不能只解析 TUI 输出或把终端文字拼成聊天界面。
 - **Android 原生界面**：尽可能覆盖 CLI 的会话管理、历史记录、模型选择、推理设置、任务进度、命令执行、文件修改与 Diff、权限审批、代码审查、MCP、Skills 和配置管理。功能清单见 [CLI 功能对照表](docs/CLI-FEATURE-PARITY.md)。
