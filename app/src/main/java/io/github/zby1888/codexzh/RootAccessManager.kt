@@ -125,12 +125,12 @@ internal class RootAccessManager(context: Context) {
                 )
             }
 
-            RootAccessStatus(
+            return RootAccessStatus(
                 RootAccessState.DENIED,
                 "Root 未获授权或检查未通过。请在 Root 管理器中允许本应用，然后重新申请。"
             )
         } catch (error: Exception) {
-            RootAccessStatus(
+            return RootAccessStatus(
                 RootAccessState.ERROR,
                 "Root 状态检查失败：${error.message ?: "未知错误"}"
             )
