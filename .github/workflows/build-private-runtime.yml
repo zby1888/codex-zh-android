@@ -76,8 +76,15 @@ jobs:
           restore-keys: |
             termux-private-runtime-ubuntu24-aarch64-
 
-      - name: Prepare writable Termux cache directory
-        run: mkdir -p "$HOME/.termux-build"
+      - name: Prepare writable Termux build and prefix directories
+        run: |
+          mkdir -p "$HOME/.termux-build" "$HOME/.termux-build/prefix"
+          # The container's writable overlay is much smaller than the runner disk.
+          # Keep installed Termux packages on the persistent host-mounted build volume.
+          chmod 0777 "$HOME/.termux-build" "$HOME/.termux-build/prefix"
+          echo "===== Host disk after cache restore ====="
+          df -h "$HOME"
+          du -sh "$HOME/.termux-build" "$HOME/.termux-build/prefix" || true
 
       - name: Pull pinned Ubuntu builder base image
         run: docker pull ubuntu:26.04
@@ -94,13 +101,14 @@ jobs:
           TERMUX_BUILDER_IMAGE_NAME: codex-runtime-builder:${{ github.sha }}
           CONTAINER_NAME: codex-runtime-builder-${{ github.run_id }}
         run: |
-          # Mount only the Termux build cache. Do not bind-mount the runner's
-          # /data directory: the bootstrap builder must write /data/TERMUX_ARCH
-          # inside its container, while the runner's /data is not writable.
-          export TERMUX_DOCKER_RUN_EXTRA_ARGS="--volume $HOME/.termux-build:/home/builder/.termux-build"
+          # Mount only dedicated writable directories. Never bind-mount the runner's
+          # /data: Termux creates /data/TERMUX_ARCH inside the container. The package
+          # prefix is mounted separately to keep large installed binaries/libraries
+          # out of Docker's limited writable overlay and persist them in Actions cache.
+          export TERMUX_DOCKER_RUN_EXTRA_ARGS="--volume $HOME/.termux-build:/home/builder/.termux-build --volume $HOME/.termux-build/prefix:/data/data/com.codex.zhou/files/runtime/prefix"
           # The 7.7 GiB hosted runner killed rustc while compiling codex-tui.
           # Build one package at a time and disable Thin LTO to lower peak RAM.
-          ./scripts/run-docker.sh bash -c 'cd /home/builder/termux-packages && export TERMUX_PKG_MAKE_PROCESSES=1 CARGO_PROFILE_RELEASE_LTO=false && ./scripts/build-bootstraps.sh --android10 --architectures aarch64'
+          ./scripts/run-docker.sh bash -c 'cd /home/builder/termux-packages && export TERMUX_PKG_MAKE_PROCESSES=1 CARGO_PROFILE_RELEASE_LTO=false && echo "===== Container disk before build =====" && df -h / /data /data/data/com.codex.zhou/files/runtime/prefix && ./scripts/build-bootstraps.sh --android10 --architectures aarch64'
 
       - name: Validate bootstrap and write provenance
         run: |
