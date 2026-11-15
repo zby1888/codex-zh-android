@@ -80,7 +80,14 @@ def main() -> None:
         raise SystemExit(f"Bootstrap archive not found: {archive}")
 
     with zipfile.ZipFile(archive) as zf:
-        names = {safe_archive_path(info.filename) for info in zf.infolist() if not info.is_dir()}
+        archive_names = [safe_archive_path(info.filename) for info in zf.infolist()]
+        if len(archive_names) != len(set(archive_names)):
+            raise SystemExit("Bootstrap archive contains duplicate normalized paths")
+        names = {
+            safe_archive_path(info.filename)
+            for info in zf.infolist()
+            if not info.is_dir()
+        }
         if "SYMLINKS.txt" not in names:
             raise SystemExit("Bootstrap archive is missing SYMLINKS.txt")
         raw_links = zf.read("SYMLINKS.txt").decode("utf-8")
