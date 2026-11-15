@@ -10,9 +10,9 @@
 
 | CLI 能力 | Android 界面入口 | 接入方式 | 验收要求 |
 |---|---|---|---|
-| 新建、继续、恢复会话 | 聊天 / 会话列表 | App Server thread/start、thread/resume | 关闭 App 后仍能找回会话 |
+| 新建、继续、恢复会话 | 聊天 / 会话列表 | App Server thread/start、thread/resume | 基础列表/恢复 UI 已接入；还需验证进程重启后的恢复 |
 | 会话分支、归档、恢复 | 会话详情菜单 | thread/fork、thread/archive、thread/unarchive | 原会话不被覆盖 |
-| 历史记录和分页 | 聊天时间线 | thread/turns/list、thread/items/list | 长会话可分页加载 |
+| 历史记录和分页 | 聊天时间线 | thread/turns/list、thread/items/list | 基础历史加载已接入；长会话分页仍待实现 |
 | 发送、追加指令、停止 | 聊天输入栏 | turn/start、turn/steer、turn/interrupt | 流式响应、停止和继续状态准确 |
 | 智能体思考与执行进度 | 消息时间线 / 任务详情 | item 生命周期、delta、turn 事件 | 区分回答、命令、文件修改、工具调用 |
 | 命令执行与输出 | 执行卡片 | commandExecution 事件 | 显示命令、工作目录、实时输出和退出状态 |
