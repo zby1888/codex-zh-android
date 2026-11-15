@@ -98,14 +98,24 @@ internal class CodexAgentController(
         model: String? = null,
         effort: String? = null
     ): CodexTurn {
-        require(threadId.isNotBlank()) { "会话 ID 不能为空" }
         require(text.isNotBlank()) { "消息内容不能为空" }
-
         val input = JSONArray().put(
-            JSONObject()
-                .put("type", "text")
-                .put("text", text)
+            JSONObject().put("type", "text").put("text", text)
         )
+        return startTurn(threadId, input, workingDirectory, model, effort)
+    }
+
+    /** Starts a Codex turn with protocol-native text/image/file inputs. */
+    fun startTurn(
+        threadId: String,
+        input: JSONArray,
+        workingDirectory: String? = null,
+        model: String? = null,
+        effort: String? = null
+    ): CodexTurn {
+        require(threadId.isNotBlank()) { "会话 ID 不能为空" }
+        require(input.length() > 0) { "至少需要一条消息或附件" }
+
         val params = JSONObject()
             .put("threadId", threadId)
             .put("input", input)
@@ -121,12 +131,18 @@ internal class CodexAgentController(
     }
 
     fun steerTurn(threadId: String, expectedTurnId: String, text: String) {
-        require(threadId.isNotBlank()) { "会话 ID 不能为空" }
-        require(expectedTurnId.isNotBlank()) { "当前轮次 ID 不能为空" }
         require(text.isNotBlank()) { "追加内容不能为空" }
         val input = JSONArray().put(
             JSONObject().put("type", "text").put("text", text)
         )
+        steerTurn(threadId, expectedTurnId, input)
+    }
+
+    /** Appends protocol-native input items to an active turn. */
+    fun steerTurn(threadId: String, expectedTurnId: String, input: JSONArray) {
+        require(threadId.isNotBlank()) { "会话 ID 不能为空" }
+        require(expectedTurnId.isNotBlank()) { "当前轮次 ID 不能为空" }
+        require(input.length() > 0) { "至少需要一条补充消息或附件" }
         client.request(
             "turn/steer",
             JSONObject()
