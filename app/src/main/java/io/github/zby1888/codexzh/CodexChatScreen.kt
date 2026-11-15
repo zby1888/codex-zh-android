@@ -597,25 +597,29 @@ internal fun CodexChatScreen(
         }
     }
 
+    suspend fun applyWorkspaceSelection(path: String) {
+        val selected = withContext(Dispatchers.IO) {
+            workspaceRepository.validate(File(path)).canonicalPath
+        }
+        state.threadId = null
+        state.workingDirectory = selected
+        state.activeTurnId = null
+        state.isWorking = false
+        state.entries.clear()
+        state.pendingApproval = null
+        state.pendingUserInput = null
+        state.showRecentThreads = false
+        state.status = "已切换项目；旧会话仍保留在历史记录中"
+        showWorkspacePicker = false
+    }
+
     fun selectWorkspace(path: String) {
         if (state.isWorking || state.isSubmitting) return
         scope.launch {
             state.isSubmitting = true
             state.error = null
             try {
-                val selected = withContext(Dispatchers.IO) {
-                    workspaceRepository.validate(File(path)).canonicalPath
-                }
-                state.threadId = null
-                state.workingDirectory = selected
-                state.activeTurnId = null
-                state.isWorking = false
-                state.entries.clear()
-                state.pendingApproval = null
-                state.pendingUserInput = null
-                state.showRecentThreads = false
-                state.status = "已切换项目；旧会话仍保留在历史记录中"
-                showWorkspacePicker = false
+                applyWorkspaceSelection(path)
             } catch (error: Exception) {
                 state.error = error.message?.take(600) ?: "切换项目失败"
             } finally {
@@ -636,9 +640,10 @@ internal fun CodexChatScreen(
                 }
                 if (created !in workspaceOptions) workspaceOptions.add(created)
                 newWorkspaceName = ""
-                selectWorkspace(created)
+                applyWorkspaceSelection(created)
             } catch (error: Exception) {
                 state.error = error.message?.take(600) ?: "创建项目失败"
+            } finally {
                 state.isSubmitting = false
             }
         }
