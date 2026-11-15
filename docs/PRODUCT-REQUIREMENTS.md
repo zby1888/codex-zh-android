@@ -7,12 +7,13 @@
 
 ## 平台
 - Android API 24+，优先验证 Android 14。
-- 首期仅 `arm64-v8a`；不要求 Root，不依赖 Termux。
+- 首期仅 arm64-v8a；基础功能不要求 Root，不依赖 Termux；Root 作为用户主动申请的可选能力。
 - 首次启动离线初始化应用私有目录和预置运行时。
 - 独立 `PREFIX`、`HOME`、`CODEX_HOME`，不触碰外部 Termux 和原有 `~/.codex`。
 
 ## 功能
-- 终端：PTY、终端模拟器、复制粘贴、快捷键、多会话、进程管理。
+- 终端：普通身份 PTY、可选 Root PTY、终端模拟器、复制粘贴、快捷键、多会话、进程管理。
+- 逆向 / 动态调试：优先支持授权范围内的 APK / Manifest / DEX 分析、Logcat、设备和进程诊断；逐步评估 ARM64 GDB / LLDB / Frida 等工具。进程附加、Hook / 注入、系统文件写入等高风险动作必须单独审批。
 - 聊天：Codex App Server JSON-RPC、通用模型聊天、流式输出、停止生成、历史会话。
 - 服务商：协议、Base URL、API 密钥、模型 ID、自定义 Header、默认模型、连通性测试。
 - MCP：STDIO、Streamable HTTP、Bearer Token/OAuth、工具发现、逐工具审批和调用日志。
@@ -26,6 +27,7 @@
 
 ## 非目标
 - 不修改现有 Termux 安装。
-- 不默认提权或启动本地监听。
+- 不默认提权或启动本地监听；Root 仅通过系统 Root 管理器明确授权后供独立终端 / 受控工具使用，Codex Agent 本身始终不以 root 运行。
 - 不自动执行高风险命令或有副作用的 MCP 工具。
+- 逆向、动态调试和 Root 能力仅面向自有或明确授权的设备及软件，不绕过用户授权或隐藏进程操作。
 - 不承诺未预置的第三方 MCP 包离线可用。
