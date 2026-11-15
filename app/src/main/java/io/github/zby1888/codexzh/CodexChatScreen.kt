@@ -558,7 +558,7 @@ internal fun CodexChatScreen(
         CodexWorkspaceRepository(runtimeManager.paths.home)
     }
     var showWorkspacePicker by remember { mutableStateOf(false) }
-    var workspaceOptions = remember { mutableStateListOf<String>() }
+    val workspaceOptions = remember { mutableStateListOf<String>() }
     var newWorkspaceName by remember { mutableStateOf("") }
     val handler = remember { Handler(Looper.getMainLooper()) }
     suspend fun ensureAgent(): CodexAgentController {
@@ -608,6 +608,7 @@ internal fun CodexChatScreen(
         state.entries.clear()
         state.pendingApproval = null
         state.pendingUserInput = null
+        state.userInputAnswers.clear()
         state.showRecentThreads = false
         state.status = "已切换项目；旧会话仍保留在历史记录中"
         showWorkspacePicker = false
