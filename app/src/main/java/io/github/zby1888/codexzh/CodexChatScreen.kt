@@ -554,6 +554,12 @@ internal fun CodexChatScreen(
     var renameValue by remember { mutableStateOf("") }
     var archiveTarget by remember { mutableStateOf<CodexThreadSummary?>(null) }
     var deleteTarget by remember { mutableStateOf<CodexThreadSummary?>(null) }
+    val workspaceRepository = remember(context) {
+        CodexWorkspaceRepository(runtimeManager.paths.home)
+    }
+    var showWorkspacePicker by remember { mutableStateOf(false) }
+    var workspaceOptions = remember { mutableStateListOf<String>() }
+    var newWorkspaceName by remember { mutableStateOf("") }
     val handler = remember { Handler(Looper.getMainLooper()) }
     suspend fun ensureAgent(): CodexAgentController {
         state.controller?.takeIf { it.isConnected }?.let { return it }
@@ -569,6 +575,72 @@ internal fun CodexChatScreen(
         }.also {
             state.controller = it
             state.status = "已连接 Codex App Server"
+        }
+    }
+
+    fun openWorkspacePicker() {
+        scope.launch {
+            state.isSubmitting = true
+            state.error = null
+            try {
+                val projects = withContext(Dispatchers.IO) {
+                    workspaceRepository.list().map { it.canonicalPath }
+                }
+                workspaceOptions.clear()
+                workspaceOptions.addAll(projects)
+                showWorkspacePicker = true
+            } catch (error: Exception) {
+                state.error = error.message?.take(600) ?: "读取项目目录失败"
+            } finally {
+                state.isSubmitting = false
+            }
+        }
+    }
+
+    fun selectWorkspace(path: String) {
+        if (state.isWorking || state.isSubmitting) return
+        scope.launch {
+            state.isSubmitting = true
+            state.error = null
+            try {
+                val selected = withContext(Dispatchers.IO) {
+                    workspaceRepository.validate(File(path)).canonicalPath
+                }
+                state.threadId = null
+                state.workingDirectory = selected
+                state.activeTurnId = null
+                state.isWorking = false
+                state.entries.clear()
+                state.pendingApproval = null
+                state.pendingUserInput = null
+                state.showRecentThreads = false
+                state.status = "已切换项目；旧会话仍保留在历史记录中"
+                showWorkspacePicker = false
+            } catch (error: Exception) {
+                state.error = error.message?.take(600) ?: "切换项目失败"
+            } finally {
+                state.isSubmitting = false
+            }
+        }
+    }
+
+    fun createWorkspace() {
+        val name = newWorkspaceName.trim()
+        if (name.isBlank() || state.isWorking || state.isSubmitting) return
+        scope.launch {
+            state.isSubmitting = true
+            state.error = null
+            try {
+                val created = withContext(Dispatchers.IO) {
+                    workspaceRepository.create(name).canonicalPath
+                }
+                if (created !in workspaceOptions) workspaceOptions.add(created)
+                newWorkspaceName = ""
+                selectWorkspace(created)
+            } catch (error: Exception) {
+                state.error = error.message?.take(600) ?: "创建项目失败"
+                state.isSubmitting = false
+            }
         }
     }
 
@@ -751,7 +823,6 @@ internal fun CodexChatScreen(
 
     fun startNewConversation() {
         state.threadId = null
-        state.workingDirectory = null
         state.activeTurnId = null
         state.isWorking = false
         state.entries.clear()
@@ -961,253 +1032,72 @@ internal fun CodexChatScreen(
         Card {
             Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Codex 智能体", fontWeight = FontWeight.SemiBold)
-                    Text(if (state.controller?.let { it.isConnected } == true) "已连接" else "未连接")
-                }
-                Text(state.status, style = MaterialTheme.typography.bodySmall)
-                state.threadId?.let {
-                    Text("会话：${it.take(8)}…", style = MaterialTheme.typography.labelSmall)
-                }
-                if (providerRepository.getDefaultCodexAgent() == null) {
-                    Text("还没有设置 Codex Agent 服务商。", style = MaterialTheme.typography.bodySmall)
-                    OutlinedButton(onClick = onOpenProviders) { Text("去设置服务商") }
-                }
+            TextButton(onClick = { openWorkspacePicker() }, enabled = !state.isSubmitting && !state.isWorking) {
+                val name = state.workingDirectory?.substringAfterLast('/') ?: "选择项目"
+                Text("项目：$name")
             }
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Column(Modifier.weight(1f)) {
-                Box {
-                    OutlinedButton(
-                        onClick = {
-                            if (state.models.isEmpty()) refreshModels()
-                            else modelMenuExpanded = true
-                        },
-                        enabled = !state.isSubmitting
-                    ) {
-                        Text(
-                            state.models.firstOrNull { it.id == state.selectedModelId }?.displayName
-                                ?: "读取模型列表"
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = modelMenuExpanded,
-                        onDismissRequest = { modelMenuExpanded = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("刷新模型列表") },
-                            onClick = {
-                                modelMenuExpanded = false
-                                refreshModels()
-                            }
-                        )
-                        state.models.forEach { model ->
-                            DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Text(model.displayName)
-                                        if (model.description.isNotBlank()) {
-                                            Text(
-                                                model.description,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                maxLines = 2
-                                            )
-                                        }
-                                    }
-                                },
-                                onClick = {
-                                    state.selectModel(model)
-                                    modelMenuExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-            Column {
-                Box {
-                    OutlinedButton(
-                        onClick = { effortMenuExpanded = true },
-                        enabled = state.models.firstOrNull { it.id == state.selectedModelId }
-                            ?.reasoningEfforts?.isNotEmpty() == true
-                    ) {
-                        Text(state.selectedReasoningEffort ?: "默认推理")
-                    }
-                    DropdownMenu(
-                        expanded = effortMenuExpanded,
-                        onDismissRequest = { effortMenuExpanded = false }
-                    ) {
-                        state.models.firstOrNull { it.id == state.selectedModelId }
-                            ?.reasoningEfforts?.forEach { effort ->
-                                DropdownMenuItem(
-                                    text = { Text(effort) },
-                                    onClick = {
-                                        state.selectedReasoningEffort = effort
-                                        effortMenuExpanded = false
-                                    }
-                                )
-                            }
-                    }
-                }
-            }
-        }
-
-        state.error?.let { error ->
-            Card {
-                Column(Modifier.fillMaxWidth().padding(12.dp)) {
-                    Text("遇到问题", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold)
-                    Text(error, style = MaterialTheme.typography.bodySmall)
-                    TextButton(onClick = { state.error = null }) { Text("知道了") }
-                }
-            }
-        }
-
-        state.pendingUserInput?.let { pending ->
-            Card {
-                Column(
-                    Modifier.fillMaxWidth().padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text("Codex 需要你回答", fontWeight = FontWeight.SemiBold)
-                    if (pending.questions.isEmpty()) {
-                        Text("收到的问题没有可显示的内容。", style = MaterialTheme.typography.bodySmall)
-                    }
-                    pending.questions.forEach { question ->
-                        Text(question.header, style = MaterialTheme.typography.labelMedium)
-                        Text(question.question, style = MaterialTheme.typography.bodyMedium)
-                        if (question.options.isNotEmpty()) {
-                            question.options.forEach { option ->
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    androidx.compose.material3.RadioButton(
-                                        selected = state.userInputAnswers[question.id] == option.label,
-                                        onClick = {
-                                            state.userInputAnswers[question.id] = option.label
-                                        }
-                                    )
-                                    Column(Modifier.weight(1f)) {
-                                        Text(option.label, style = MaterialTheme.typography.bodyMedium)
-                                        if (option.description.isNotBlank()) {
-                                            Text(option.description, style = MaterialTheme.typography.bodySmall)
-                                        }
-                                    }
-                                }
-                            }
-                            if (question.options.any { it.label.equals("其他", true) || it.label.equals("other", true) }) {
-                                OutlinedTextField(
-                                    value = state.userInputAnswers[question.id].orEmpty(),
-                                    onValueChange = { state.userInputAnswers[question.id] = it },
-                                    label = { Text("补充回答") },
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
-                        } else {
-                            OutlinedTextField(
-                                value = state.userInputAnswers[question.id].orEmpty(),
-                                onValueChange = { state.userInputAnswers[question.id] = it },
-                                label = { Text("你的回答") },
-                                singleLine = true,
-                                visualTransformation = if (question.isSecret) PasswordVisualTransformation()
-                                    else androidx.compose.ui.text.input.VisualTransformation.None,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = { submitUserInput() },
-                            enabled = !state.isSubmitting && pending.questions.isNotEmpty()
-                        ) { Text("提交回答") }
-                        if (pending.isBlocking) {
-                            Text("当前任务正在等待回答", style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
-                }
-            }
-        }
-
-        state.pendingApproval?.let { pending ->
-            Card {
-                Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("等待你确认", fontWeight = FontWeight.SemiBold)
-                    Text(
-                        when (pending.method) {
-                            "item/commandExecution/requestApproval" -> "Codex 请求执行一条命令。请确认后再继续。"
-                            "item/fileChange/requestApproval" -> "Codex 请求应用文件修改。请确认后再继续。"
-                            else -> "收到尚未支持的请求：${pending.method}。为安全起见，不会自动批准。"
-                        },
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    val detail = buildString {
-                        val reason = pending.params.optString("reason")
-                        val command = pending.params.optString("command")
-                        val cwd = pending.params.optString("cwd")
-                        if (reason.isNotBlank()) append(reason)
-                        if (command.isNotBlank()) {
-                            if (isNotEmpty()) append("\n")
-                            append("命令：").append(command)
-                        }
-                        if (cwd.isNotBlank()) {
-                            if (isNotEmpty()) append("\n")
-                            append("工作目录：").append(cwd)
-                        }
-                    }
-                    if (detail.isNotBlank()) Text(detail, style = MaterialTheme.typography.bodySmall)
-                    if (pending.supported) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { answerApproval("accept") }) { Text("允许一次") }
-                            OutlinedButton(onClick = { answerApproval("acceptForSession") }) { Text("本会话允许") }
-                            TextButton(onClick = { answerApproval("decline") }) { Text("拒绝") }
-                        }
-                    } else {
-                        Text(
-                            "当前版本还不能处理这种请求。为避免智能体一直等待，可以安全拒绝它。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                        OutlinedButton(onClick = { rejectUnsupportedRequest() }) {
-                            Text("拒绝这个请求")
-                        }
-                    }
-                }
-            }
-        }
-
-        LazyColumn(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            if (state.entries.isEmpty()) {
-                item {
-                    Text(
-                        "这里会显示 Codex 的回复、执行步骤、命令输出和文件变更。\n首次使用前，请先安装私有运行环境并配置 Responses API 服务商。",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-            }
-            items(state.entries, key = { it.id }) { entry ->
-                Card {
-                    Column(Modifier.fillMaxWidth().padding(12.dp)) {
-                        Text(entry.title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(4.dp))
-                        Text(entry.text, style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            }
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = { refreshThreads() }, enabled = !state.isSubmitting) {
                 Text("历史会话")
             }
             TextButton(onClick = { startNewConversation() }, enabled = !state.isSubmitting) {
                 Text("新建会话")
             }
-            state.workingDirectory?.let {
-                Text(it.substringAfterLast('/'), style = MaterialTheme.typography.labelSmall)
-            }
+        }
+        if (showWorkspacePicker) {
+            AlertDialog(
+                onDismissRequest = { if (!state.isSubmitting) showWorkspacePicker = false },
+                title = { Text("选择项目工作区") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "项目目录限定在应用自己的 HOME/projects 中。切换项目会新建会话，旧会话不会删除。",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        if (workspaceOptions.isEmpty()) {
+                            Text("还没有项目，可以在下面创建一个。")
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxWidth().height(220.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                items(workspaceOptions, key = { it }) { path ->
+                                    TextButton(
+                                        onClick = { selectWorkspace(path) },
+                                        enabled = !state.isSubmitting && !state.isWorking,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(Modifier.fillMaxWidth()) {
+                                            Text(path.substringAfterLast('/'))
+                                            Text(
+                                                path,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        OutlinedTextField(
+                            value = newWorkspaceName,
+                            onValueChange = { newWorkspaceName = it },
+                            label = { Text("新项目名称") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedButton(
+                            onClick = { createWorkspace() },
+                            enabled = newWorkspaceName.isNotBlank() && !state.isSubmitting && !state.isWorking
+                        ) { Text("创建并切换") }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = { showWorkspacePicker = false },
+                        enabled = !state.isSubmitting
+                    ) { Text("关闭") }
+                }
+            )
         }
         if (state.showRecentThreads) {
             Card {
@@ -1364,11 +1254,5 @@ internal fun CodexChatScreen(
     }
 }
 
-private fun defaultWorkspace(home: File): String {
-    val workspace = File(home, "projects/default")
-    if (!workspace.exists()) check(workspace.mkdirs()) { "无法创建默认项目目录" }
-    val homePath = home.canonicalFile.path.trimEnd(File.separatorChar) + File.separator
-    check(workspace.canonicalFile.path.startsWith(homePath)) { "默认项目目录越界，已拒绝使用" }
-    check(workspace.isDirectory) { "默认项目路径不是目录" }
-    return workspace.canonicalPath
-}
+private fun defaultWorkspace(home: File): String =
+    CodexWorkspaceRepository(home).defaultWorkspace().canonicalPath
