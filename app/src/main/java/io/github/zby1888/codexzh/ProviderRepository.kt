@@ -145,10 +145,10 @@ internal class ProviderRepository(context: Context) {
         val apiKeyEnv = if (credentials.apiKey.isNotBlank()) "${prefix}_API_KEY" else null
         if (apiKeyEnv != null) values[apiKeyEnv] = credentials.apiKey
         val headerEnv = linkedMapOf<String, String>()
-        credentials.customHeaders.toSortedMap().forEachIndexed { index, (name, value) ->
+        credentials.customHeaders.toSortedMap().entries.forEachIndexed { index, entry ->
             val envName = "${prefix}_HEADER_${index + 1}"
-            headerEnv[name] = envName
-            values[envName] = value
+            headerEnv[entry.key] = envName
+            values[envName] = entry.value
         }
         return CodexProviderEnvironment(apiKeyEnv, headerEnv, values)
     }
