@@ -120,6 +120,7 @@ internal class CodexChatUiState {
     var showArchivedThreads by mutableStateOf(false)
     val recentThreads = mutableStateListOf<CodexThreadSummary>()
     val mcpServers = mutableStateListOf<CodexMcpServerSummary>()
+    val mcpOAuthMessages = mutableStateMapOf<String, String>()
     val models = mutableStateListOf<CodexModelOption>()
     var selectedModelId by mutableStateOf<String?>(null)
     var selectedReasoningEffort by mutableStateOf<String?>(null)
@@ -386,6 +387,18 @@ internal class CodexChatUiState {
         val method = message.optString("method")
         val params = message.optJSONObject("params") ?: JSONObject()
         when (method) {
+            "mcpServer/oauthLogin/completed" -> {
+                val name = params.optString("name")
+                val success = params.optBoolean("success")
+                val detail = params.optString("error")
+                if (name.isNotBlank()) {
+                    mcpOAuthMessages[name] = if (success) {
+                        "OAuth 授权完成"
+                    } else {
+                        "OAuth 授权失败：${detail.ifBlank { "请检查授权页面或服务端日志" }}"
+                    }
+                }
+            }
             "turn/started" -> {
                 val turn = params.optJSONObject("turn") ?: JSONObject()
                 activeTurnId = turn.optString("id").takeIf { it.isNotBlank() }
