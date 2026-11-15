@@ -27,6 +27,23 @@ internal class CodexMcpController(
     fun refreshServers(): JSONObject =
         client.request("mcpServer/refresh", JSONObject())
 
+    fun reloadConfiguration(): JSONObject =
+        client.request("config/mcpServer/reload", JSONObject())
+
+    fun readResource(
+        serverName: String,
+        uri: String,
+        threadId: String? = null
+    ): JSONObject {
+        require(serverName.isNotBlank()) { "MCP 服务名称不能为空" }
+        require(uri.isNotBlank()) { "MCP 资源地址不能为空" }
+        val params = JSONObject()
+            .put("server", serverName)
+            .put("uri", uri)
+        if (!threadId.isNullOrBlank()) params.put("threadId", threadId)
+        return client.request("mcpServer/resource/read", params)
+    }
+
     fun callTool(
         threadId: String,
         serverName: String,
