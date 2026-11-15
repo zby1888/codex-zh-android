@@ -24,7 +24,9 @@ Codex App Server 的 JSON-RPC/stdio 是优先评估的 Agent 图形界面接入�
 - RuntimeBootstrapBuilder：CI 从锁定的 Termux package recipes 按本应用 ID 和自定义 prefix 重建 Bionic/ARM64 软件包；不搬运用户现有 Termux 安装。
 - RuntimeBootstrapInstaller：校验 APK 内置 SHA-256 清单、隔离解包、恢复安全符号链接、设置执行权限和原子切换。
 - PtySessionManager：PTY 创建、恢复、关闭（待实现）。
-- CodexAppServerClient：JSON-RPC 请求、通知和事件流（待实现）。
+- CodexAppServerClient：JSON-RPC 请求、通知和服务端请求通道（代码已实现；真实设备协议验收待完成）。
+- CodexAgentController：会话和轮次操作封装（代码已实现；完整功能 UI 与端到端验证持续补齐）。
+- CodexChatScreen：聊天消息、流式增量、执行事件和初步审批卡片（已接线；需真实 Runtime / API 测试）。
 - ChatProviderAdapter：Responses、Chat Completions、Anthropic、Gemini 适配（待实现）。
 - McpConnectionManager：STDIO/HTTP 连接与工具目录（待实现）。
 - ApprovalController：命令、工具和文件写入审批（待实现）。
@@ -32,7 +34,7 @@ Codex App Server 的 JSON-RPC/stdio 是优先评估的 Agent 图形界面接入�
 
 目录位于应用私有存储：files/runtime/prefix、files/runtime/tmp、files/home、files/codex。路径创建前会进行规范化边界检查，不提供 Termux 路径回退，也不访问 /data/data/com.termux/files/usr。
 
-当前实现包含私有目录基础层、ARM64 运行时源码构建流水线和 APK 内置 bootstrap 安装器；基础工具链已在 Android 14 / ARM64 实机完成安装验证。接下来进入 PTY、Codex CLI、App Server、通用协议和 MCP 连接器集成。
+当前实现包含私有目录基础层、ARM64 运行时源码构建流水线、APK 内置 bootstrap 安装器、App Server JSON-RPC 客户端和基础聊天 UI 接线；基础工具链曾在 Android 14 / ARM64 实机完成安装验证。当前分支尚未完成 App Server 与 Codex 进程的实机端到端验证。接下来重点完成会话历史恢复、审批闭环、真正 PTY、MCP 执行器和通用协议适配。
 
 ## 开源项目参考与边界
 
