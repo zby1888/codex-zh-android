@@ -63,3 +63,8 @@ GitHub Actions 会构建 Debug APK 并上传为 Actions Artifact。
 3. API 密钥不得写入日志或提交到仓库。
 4. 工具调用和有副作用的操作默认需要用户审批。
 5. 移植第三方代码、文案或资源前必须审查许可证。
+
+
+## Android UI / UX 设计方向
+
+聊天主界面借鉴 ChatGPT 移动端成熟的交互规律：简洁会话侧栏、聊天内容优先、输入区集中附件和工具入口、流式过程清楚易读。项目、命令执行、文件 Diff、MCP 和审批仍按 Codex 的实际能力做成原生结构化界面。完整设计与实施顺序见 [Android UI / UX 设计规范](docs/ANDROID-UI-UX-DESIGN.md)。只借鉴交互思路，不复制 ChatGPT 品牌资源、专有图标或文案。

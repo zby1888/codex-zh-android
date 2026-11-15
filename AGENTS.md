@@ -1,6 +1,6 @@
 # Codex Agent 开发约束
 
-本文件是仓库内 Codex CLI、自动化 Agent 和人工开发者的长期项目指令。开始任何代码修改前必须先阅读本文件，并阅读 README.md、docs/ARCHITECTURE.md、docs/CLI-FEATURE-PARITY.md、docs/TERMINAL-PTY-ARCHITECTURE.md 和 docs/ROOT-DEBUGGING-ARCHITECTURE.md。
+本文件是仓库内 Codex CLI、自动化 Agent 和人工开发者的长期项目指令。开始任何代码修改前必须先阅读本文件，并阅读 README.md、docs/ARCHITECTURE.md、docs/CLI-FEATURE-PARITY.md、docs/ANDROID-UI-UX-DESIGN.md、docs/TERMINAL-PTY-ARCHITECTURE.md 和 docs/ROOT-DEBUGGING-ARCHITECTURE.md。
 
 ## 项目唯一目标
 
@@ -48,3 +48,13 @@
 - 构建失败时先读取完整失败日志，定位实际失败步骤；不要凭猜测更换构建工具或删依赖。
 - UI-only APK 不等于含完整私有运行环境的 APK；Runtime bootstrap 成功也不等于 Codex Agent、MCP 和 PTY 已通过实机测试。
 - 提交说明应使用中文或清晰的英文，描述真实改动和未完成项。
+
+## Android UI / UX 设计约束
+
+- 开发聊天页面前必须先阅读 `docs/ANDROID-UI-UX-DESIGN.md`；优先采用聊天内容为主、会话导航抽屉、集中式输入工具菜单和固定底部 Composer 的移动交互。
+- 不要把全部消息、命令输出和工具事件都渲染成相同的 Card。按用户消息、Agent 正文、命令执行、MCP 调用、文件变更和审批请求分别设计展示组件。
+- 不要把模型、推理强度、项目目录、Agent 状态和会话操作全部长期堆在聊天顶部；常用信息精简显示，低频配置按需打开。
+- 追加指令和停止任务必须有清楚、不同的操作入口；审批必须保持突出，不能为了视觉简洁而隐藏。
+- 输入区工具菜单只显示已经接通的功能；未实现的麦克风、附件、文件选择或工具入口不能做成无动作的装饰按钮。
+- 参考 ChatGPT、OpenCode、Operit 和 RikkaHub 时只借鉴交互与架构原则；不复制品牌资源、专有图标、受版权保护的文案或未经许可证审查的代码。
+- UI 调整后必须执行 Android Debug 构建，并尽可能增加截图/交互测试；构建成功只能说明编译和打包通过，不等于真机体验验收完成。
