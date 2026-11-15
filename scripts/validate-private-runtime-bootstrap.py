@@ -17,10 +17,14 @@ CONFIG = json.loads((ROOT / "runtime/private-runtime-config.json").read_text(enc
 def safe_archive_path(name: str) -> str:
     if not name or name.startswith("/") or "\\" in name:
         raise ValueError(f"Unsafe archive path: {name!r}")
-    normalized = posixpath.normpath(name)
-    if normalized in {".", ".."} or normalized.startswith("../"):
+    # Match the on-device installer: allow one leading './', but reject every
+    # dot or parent segment instead of normalizing traversal away.
+    name = name.removeprefix("./")
+    trimmed = name.rstrip("/")
+    parts = trimmed.split("/")
+    if not trimmed or any(part in {"", ".", ".."} for part in parts):
         raise ValueError(f"Archive path escapes prefix: {name!r}")
-    return normalized.rstrip("/")
+    return "/".join(parts)
 
 
 def validate_symlink_target(link: str, target: str) -> None:
@@ -33,7 +37,9 @@ def validate_symlink_target(link: str, target: str) -> None:
         )
         if not (target == prefix or target.startswith(prefix + "/")
                 or target.startswith("/system/") or target.startswith("/apex/")
-                or target.startswith("/vendor/")):
+                or target.startswith("/vendor/") or target.startswith("/product/")
+                or target.startswith("/odm/") or target.startswith("/proc/")
+                or target.startswith("/dev/")):
             raise ValueError(f"Absolute symlink target escapes app prefix: {link} -> {target}")
     else:
         resolved = posixpath.normpath(posixpath.join(posixpath.dirname(link), target))
