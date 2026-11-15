@@ -31,6 +31,10 @@ private enum class Tab(val label: String, val glyph: String) {
 @Composable
 private fun CodexZhApp() {
     var tab by remember { mutableStateOf(Tab.Chat) }
+    val chatState = remember { CodexChatUiState() }
+    DisposableEffect(chatState) {
+        onDispose { chatState.closeInBackground() }
+    }
     MaterialTheme {
         Scaffold(
             topBar = {
@@ -55,31 +59,13 @@ private fun CodexZhApp() {
             }
         ) { padding ->
             when (tab) {
-                Tab.Chat -> ChatScreen(Modifier.padding(padding))
+                Tab.Chat -> CodexChatScreen(Modifier.padding(padding), chatState) { tab = Tab.Providers }
                 Tab.Terminal -> TerminalScreen(Modifier.padding(padding))
                 Tab.Providers -> ProviderScreen(Modifier.padding(padding))
                 Tab.Mcp -> ListScreen(Modifier.padding(padding), "MCP 工具",
                     "目标支持远程 Streamable HTTP 与本地 STDIO MCP 服务。",
                     listOf("服务列表与连接测试", "工具发现和调用进度", "允许 / 拒绝 / 每次询问", "导入 Codex、OpenCode、Operit 配置"))
             }
-        }
-    }
-}
-
-@Composable
-private fun ChatScreen(modifier: Modifier = Modifier) {
-    var prompt by remember { mutableStateOf("") }
-    Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        InfoCard("聊天工作区", "界面框架已就绪。Codex App Server 与通用模型协议适配器尚未接入。")
-        InfoCard("会话", "后续显示消息、流式输出、工具调用进度和结果。")
-        Spacer(Modifier.weight(1f))
-        OutlinedTextField(
-            value = prompt, onValueChange = { prompt = it },
-            modifier = Modifier.fillMaxWidth(), minLines = 2,
-            placeholder = { Text("输入消息（当前为界面预览）") }
-        )
-        Button(onClick = { prompt = "" }, enabled = prompt.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
-            Text("发送（尚未连接模型）")
         }
     }
 }
