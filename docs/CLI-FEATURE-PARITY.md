@@ -26,9 +26,10 @@
 | MCP 工具调用 | 聊天工具卡片 | mcpServer/tool/call、工具事件 | 展示参数、进度、结果和审批 |
 | MCP OAuth / 表单询问 | 授权页 / 表单弹层 | mcpServer/oauth/login、elicitation | 可跳转授权并回到原会话 |
 | Skills | 技能管理 | skills 配置与可用的 App Server 方法 | 启停技能、显示来源；不伪造不可用能力 |
-| 目标 / 任务预算 | 会话目标面板 | thread/goal/get、set、clear | 显示目标、预算和使用情况（协议有返回时） |
-| 代码审查 | 会话操作菜单 | review/start | 支持未提交变更、分支、提交和自定义审查 |
+| 目标 / 任务预算 | 会话操作菜单 / 目标面板 | thread/goal/get、set、clear | 已接入目标和 Token 预算编辑、清除入口；待 CI / 实机验证显示 usage 统计 |
+| 代码审查 | 会话操作菜单 | review/start | 已接入未提交改动审查入口（包含暂存、未暂存及未跟踪文件）；分支、提交和自定义审查目标待补 |
 | 配置查看和编辑 | 设置中心 / 高级配置 | config/read、config/value/write、config/batchWrite | 修改前预览，保存后重新读取验证 |
+| 上下文压缩 | 会话操作菜单 | thread/compact/start | 已接入当前会话压缩入口；压缩完成事件和实机行为待验证 |
 | 终端交互 | 终端页 | Android PTY + 终端模拟器 | 真正 TTY、交互程序、信号、窗口尺寸、多会话 |
 | 文件浏览 | 工作区文件页 | App Server 文件接口或安全文件层 | 读写、重命名、删除均有边界和确认 |
 | 快捷命令 / 斜杠命令 | 输入框命令面板 | 对应 App Server 方法或 CLI 命令映射 | 每条命令标注是否支持、是否需要终端回退 |
