@@ -167,6 +167,37 @@ internal fun CodexMcpScreen(
         }
     }
 
+    fun startOAuthLogin(serverName: String) {
+        if (busy) return
+        scope.launch {
+            busy = true
+            error = null
+            message = null
+            try {
+                val agent = ensureAgent()
+                val response = withContext(Dispatchers.IO) {
+                    agent.mcpController().startOAuthLogin(
+                        serverName = serverName,
+                        threadId = state.threadId
+                    )
+                }
+                val url = response.optString("authorizationUrl")
+                require(url.isNotBlank()) { "Codex 没有返回 OAuth 授权地址" }
+                val uri = Uri.parse(url)
+                require(uri.scheme.equals("https", true)) { "OAuth 授权地址不是 HTTPS，已拒绝打开" }
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+                state.mcpOAuthMessages[serverName] = "已打开浏览器，请完成授权后返回此页面"
+                message = "已打开 $serverName 的授权页面"
+            } catch (failure: Exception) {
+                error = failure.message?.take(600) ?: "启动 OAuth 登录失败"
+            } finally {
+                busy = false
+            }
+        }
+    }
+
     fun removeServer(name: String) {
         scope.launch {
             busy = true
@@ -447,6 +478,15 @@ internal fun CodexMcpScreen(
                             }
                             server.error?.let {
                                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                            }
+                            state.mcpOAuthMessages[server.name]?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall)
+                            }
+                            if (server.authStatus == "notLoggedIn" || server.runtimeStatus == "authenticationRequired") {
+                                OutlinedButton(
+                                    onClick = { startOAuthLogin(server.name) },
+                                    enabled = !busy
+                                ) { Text("登录并授权") }
                             }
                             Text("已发现 ${server.toolNames.size} 个工具", style = MaterialTheme.typography.labelMedium)
                             server.toolNames.take(30).forEach { tool ->
