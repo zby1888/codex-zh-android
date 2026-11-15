@@ -60,7 +60,7 @@ private fun CodexZhApp() {
         ) { padding ->
             when (tab) {
                 Tab.Chat -> CodexChatScreen(Modifier.padding(padding), chatState) { tab = Tab.Providers }
-                Tab.Terminal -> TerminalScreen(Modifier.padding(padding))
+                Tab.Terminal -> TerminalScreen(Modifier.padding(padding), chatState)
                 Tab.Providers -> ProviderScreen(Modifier.padding(padding))
                 Tab.Mcp -> CodexMcpScreen(Modifier.padding(padding), chatState) { tab = Tab.Providers }
             }
@@ -69,7 +69,7 @@ private fun CodexZhApp() {
 }
 
 @Composable
-private fun TerminalScreen(modifier: Modifier = Modifier) {
+private fun TerminalScreen(modifier: Modifier = Modifier, chatState: CodexChatUiState) {
     val context = LocalContext.current
     val manager = remember(context) { RuntimeManager(context) }
     val installer = remember(context) { RuntimeBootstrapInstaller(context, manager) }
@@ -97,6 +97,11 @@ private fun TerminalScreen(modifier: Modifier = Modifier) {
         modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        InfoCard(
+            "当前项目工作区",
+            chatState.workingDirectory
+                ?: "尚未选择项目。可以先到“聊天”页面选择或创建项目；聊天和终端会共用这个应用私有目录。"
+        )
         Card {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("独立 ARM64 运行环境", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -139,8 +144,8 @@ private fun TerminalScreen(modifier: Modifier = Modifier) {
             "首批工具链包含 Bash、Coreutils、Git、OpenSSL、CA 证书和 jq。它是 Android Bionic/ARM64 用户空间，不是 glibc 桌面 Linux。"
         )
         InfoCard(
-            "后续集成",
-            "运行时安装完成后，再接入 PTY 终端、Codex CLI、App Server、Node/Python MCP 执行环境。"
+            "终端状态",
+            "此页面目前展示共享项目目录和运行环境状态。真正的交互式 PTY、命令输入、终端模拟器和多终端会话仍在开发，当前不要把这里当作已经可执行命令的终端。"
         )
     }
 }
