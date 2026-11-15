@@ -252,8 +252,7 @@ internal fun CodexChatScreen(
                 isUser = true
             ))
             try {
-                var agent = state.controller
-                if (agent == null) {
+                val agent = state.controller ?: run {
                     val runtime = withContext(Dispatchers.IO) { runtimeManager.inspect() }
                     check(runtime.phase == RuntimePhase.RUNTIME_READY) {
                         "Codex 私有运行环境尚未就绪：${runtime.message}"
@@ -261,24 +260,24 @@ internal fun CodexChatScreen(
                     check(providerRepository.getDefaultCodexAgent() != null) {
                         "还没有设置 Codex Agent 服务商。请先添加兼容 Responses API 的服务商。"
                     }
-                    agent = withContext(Dispatchers.IO) {
+                    withContext(Dispatchers.IO) {
                         CodexAgentRuntimeFactory(context).start(listener)
+                    }.also {
+                        state.controller = it
+                        state.status = "已连接 Codex App Server"
                     }
-                    state.controller = agent
-                    state.status = "已连接 Codex App Server"
                 }
 
-                var threadId = state.threadId
-                if (threadId == null) {
+                val threadId = state.threadId ?: run {
                     val workingDirectory = withContext(Dispatchers.IO) {
                         defaultWorkspace(runtimeManager.paths.home)
                     }
-                    val thread = withContext(Dispatchers.IO) {
-                        agent.startThread(workingDirectory)
+                    withContext(Dispatchers.IO) {
+                        agent.startThread(workingDirectory).id
+                    }.also {
+                        state.threadId = it
+                        state.status = "已创建新会话"
                     }
-                    threadId = thread.id
-                    state.threadId = threadId
-                    state.status = "已创建新会话"
                 }
 
                 val activeTurn = state.activeTurnId
@@ -334,7 +333,7 @@ internal fun CodexChatScreen(
             Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Codex 智能体", fontWeight = FontWeight.SemiBold)
-                    Text(if (state.controller?.let { it.isClosed.not() } == true) "已连接" else "未连接")
+                    Text(if (state.controller?.let { it.isConnected } == true) "已连接" else "未连接")
                 }
                 Text(state.status, style = MaterialTheme.typography.bodySmall)
                 state.threadId?.let {
