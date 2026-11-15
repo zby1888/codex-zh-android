@@ -71,13 +71,14 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
         } else {
             val su = File(rootSuPath!!)
             check(su.isFile && su.canExecute()) { "Root 管理器提供的 su 路径已不可用，请重新申请授权" }
-            // Do not inject the Termux exec preload into a root-owned process.
+            // Keep the system su binary away from the private runtime loader paths.
+            // The private library path is restored only inside the root-owned Bash command.
             environment.remove("LD_PRELOAD")
+            val privateLibraryPath = environment.remove("LD_LIBRARY_PATH").orEmpty()
             val exportedKeys = listOf(
                 "PREFIX", "TERMUX_PREFIX", "TERMUX__PREFIX", "TERMUX__ROOTFS",
                 "TERMUX__HOME", "TERMUX_ANDROID_HOME", "TERMUX_APP__PACKAGE_NAME",
-                "HOME", "CODEX_HOME", "TMPDIR", "PATH", "LD_LIBRARY_PATH",
-                "TERM", "LANG", "LC_ALL"
+                "HOME", "CODEX_HOME", "TMPDIR", "PATH", "TERM", "LANG", "LC_ALL"
             )
             val rootCommand = buildString {
                 append("cd -- ").append(shellQuote(cwd.absolutePath)).append(" && ")
@@ -86,7 +87,9 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
                         append("export ").append(key).append('=').append(shellQuote(value)).append("; ")
                     }
                 }
-                append("unset LD_PRELOAD; export PS1='root@codex:\\w# '; exec ")
+                append("unset LD_PRELOAD; export LD_LIBRARY_PATH=")
+                    .append(shellQuote(privateLibraryPath)).append("; ")
+                append("export PS1='root@codex:\\w# '; exec ")
                     .append(shellQuote(paths.bash.absolutePath)).append(" -i")
             }
             executable = su.absolutePath
