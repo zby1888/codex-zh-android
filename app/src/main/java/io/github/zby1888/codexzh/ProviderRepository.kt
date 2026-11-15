@@ -115,6 +115,29 @@ internal class ProviderRepository(context: Context) {
     }
 
     @Synchronized
+    fun get(providerId: String): ProviderConfig? = list().firstOrNull { it.id == providerId }
+
+    @Synchronized
+    fun codexAgentEnvironment(providerId: String): CodexProviderEnvironment {
+        val provider = get(providerId) ?: throw IllegalArgumentException("找不到服务商配置")
+        require(provider.protocol == ProviderProtocol.CODEX_RESPONSES) {
+            "只有 Responses API 兼容服务商可以用于 Codex Agent 模式"
+        }
+        val credentials = credentials(providerId) ?: ProviderCredentials()
+        val prefix = "CODEX_ZH_PROVIDER_" + providerId.uppercase().replace(Regex("[^A-Z0-9]"), "_")
+        val values = linkedMapOf<String, String>()
+        val apiKeyEnv = if (credentials.apiKey.isNotBlank()) "${prefix}_API_KEY" else null
+        if (apiKeyEnv != null) values[apiKeyEnv] = credentials.apiKey
+        val headerEnv = linkedMapOf<String, String>()
+        credentials.customHeaders.toSortedMap().forEachIndexed { index, (name, value) ->
+            val envName = "${prefix}_HEADER_${index + 1}"
+            headerEnv[name] = envName
+            values[envName] = value
+        }
+        return CodexProviderEnvironment(apiKeyEnv, headerEnv, values)
+    }
+
+    @Synchronized
     fun setDefault(providerId: String) {
         require(readRoot().has(providerId)) { "找不到要设为默认的服务商" }
         preferences.edit().putString(DEFAULT_PROVIDER_KEY, providerId).apply()
@@ -257,3 +280,9 @@ internal class SecretStore(context: Context) {
         private const val GCM_TAG_BITS = 128
     }
 }
+
+internal data class CodexProviderEnvironment(
+    val apiKeyEnvironmentName: String?,
+    val headerEnvironmentNames: Map<String, String>,
+    val values: Map<String, String>
+)
