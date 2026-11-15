@@ -14,7 +14,7 @@
 - **中文由 App 自己负责**：Android UI、提示、设置和错误说明均由本项目维护中文文案。汉化版 CLI 可以作为以后可选方案，但**绝不能成为 APK 主线构建的强制依赖**。
 - **诚实标记完成度**：UI 骨架、Runtime、CLI/App Server、完整 APK 和实机功能测试分开验收；没有通过的能力标记为未实现或待验证，不能仅凭 UI 构建成功宣称完成。
 
-> **当前状态：基础 ARM64 私有运行环境已构建，并已在 Android 14 / ARM64 实机验证安装成功。** APK 已内置离线 bootstrap，应用可以在自己的私有目录中安装基础 Bionic 工具链；这不代表完整 Codex 客户端已经完成。真正的 PTY 终端、Codex CLI 启动、Codex App Server 聊天、通用模型协议适配器和 MCP 执行器仍需继续集成。
+> **当前状态：基础 ARM64 私有运行环境曾在 Android 14 / ARM64 实机验证安装成功。** 最近的官方 CLI 解耦和聊天界面接线仍在独立分支验证。聊天页已有 App Server 连接、创建会话、发送消息、流式文本、命令输出和审批卡片代码，但尚未在包含当前 Codex CLI 的完整运行环境中完成端到端验证。真正 PTY、多会话历史恢复、通用协议适配器、MCP 连接执行和完整 APK 实机验收仍待完成。
 
 - 应用名：Codex 中文版
 - Android applicationId：`com.codex.zhou`
