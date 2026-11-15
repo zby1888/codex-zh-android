@@ -189,8 +189,9 @@ private fun TerminalScreen(
                                         workspaceRepository.validate(java.io.File(currentWorkspace)).canonicalPath
                                     }
                                     val suPath = if (useRootShell) {
+                                        rootStatus = rootAccessManager.requestAccess()
                                         check(rootStatus.isGranted && !rootStatus.suPath.isNullOrBlank()) {
-                                            "Root 尚未通过系统授权，请先申请 Root 权限"
+                                            rootStatus.message
                                         }
                                         rootStatus.suPath
                                     } else null
