@@ -182,6 +182,69 @@ internal class CodexAgentController(
         return client.request("thread/items/list", params)
     }
 
+    fun renameThread(threadId: String, name: String) {
+        require(threadId.isNotBlank()) { "会话 ID 不能为空" }
+        require(name.isNotBlank()) { "会话名称不能为空" }
+        client.request(
+            "thread/setName",
+            JSONObject().put("threadId", threadId).put("name", name)
+        )
+    }
+
+    fun compactThread(threadId: String) {
+        require(threadId.isNotBlank()) { "会话 ID 不能为空" }
+        client.request("thread/compact/start", JSONObject().put("threadId", threadId))
+    }
+
+    /**
+     * Reverts history from beforeTurnId onward. The UI must show a confirmation
+     * explaining that this removes that turn and every later turn from history.
+     */
+    fun revertHistoryFrom(threadId: String, beforeTurnId: String) {
+        require(threadId.isNotBlank()) { "会话 ID 不能为空" }
+        require(beforeTurnId.isNotBlank()) { "目标轮次 ID 不能为空" }
+        client.request(
+            "thread/revert",
+            JSONObject().put("threadId", threadId).put("beforeTurnId", beforeTurnId)
+        )
+    }
+
+    fun startReview(threadId: String, target: JSONObject) {
+        require(threadId.isNotBlank()) { "会话 ID 不能为空" }
+        require(target.has("type")) { "审查目标类型不能为空" }
+        client.request(
+            "review/start",
+            JSONObject().put("threadId", threadId).put("target", target)
+        )
+    }
+
+    fun getGoal(threadId: String): JSONObject {
+        require(threadId.isNotBlank()) { "会话 ID 不能为空" }
+        return client.request("thread/goal/get", JSONObject().put("threadId", threadId))
+    }
+
+    fun setGoal(
+        threadId: String,
+        objective: String? = null,
+        tokenBudget: Long? = null,
+        status: String? = null
+    ) {
+        require(threadId.isNotBlank()) { "会话 ID 不能为空" }
+        val params = JSONObject().put("threadId", threadId).put("origin", "user")
+        if (objective != null) params.put("objective", objective)
+        if (tokenBudget != null) params.put("tokenBudget", tokenBudget)
+        if (!status.isNullOrBlank()) params.put("status", status)
+        client.request("thread/goal/set", params)
+    }
+
+    fun clearGoal(threadId: String) {
+        require(threadId.isNotBlank()) { "会话 ID 不能为空" }
+        client.request(
+            "thread/goal/clear",
+            JSONObject().put("threadId", threadId).put("origin", "user")
+        )
+    }
+
     fun deleteThread(threadId: String) {
         require(threadId.isNotBlank()) { "会话 ID 不能为空" }
         client.request("thread/delete", JSONObject().put("threadId", threadId))
