@@ -31,6 +31,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -39,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -80,6 +82,25 @@ internal data class CodexThreadSummary(
     val workingDirectory: String
 )
 
+internal data class CodexUserInputOption(
+    val label: String,
+    val description: String
+)
+
+internal data class CodexUserInputQuestion(
+    val id: String,
+    val header: String,
+    val question: String,
+    val isSecret: Boolean,
+    val options: List<CodexUserInputOption>
+)
+
+internal data class CodexPendingUserInput(
+    val requestId: Any,
+    val isBlocking: Boolean,
+    val questions: List<CodexUserInputQuestion>
+)
+
 internal data class CodexPendingApproval(
     val requestId: Any,
     val method: String,
@@ -107,6 +128,8 @@ internal class CodexChatUiState {
     var status by mutableStateOf("尚未连接 Codex")
     var error by mutableStateOf<String?>(null)
     var pendingApproval by mutableStateOf<CodexPendingApproval?>(null)
+    var pendingUserInput by mutableStateOf<CodexPendingUserInput?>(null)
+    val userInputAnswers = mutableStateMapOf<String, String>()
     var needsAgentRestart by mutableStateOf(false)
     val entries = mutableStateListOf<CodexChatEntry>()
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -120,8 +143,54 @@ internal class CodexChatUiState {
             val method = message.optString("method")
             val params = message.optJSONObject("params") ?: JSONObject()
             mainHandler.post {
-                pendingApproval = CodexPendingApproval(requestId, method, params)
-                status = "Codex 正在等待你的操作确认"
+                if (method == "item/tool/requestUserInput") {
+                    val questionsJson = params.optJSONArray("questions")
+                    val questions = buildList {
+                        if (questionsJson != null) {
+                            for (index in 0 until questionsJson.length()) {
+                                val question = questionsJson.optJSONObject(index) ?: continue
+                                val optionsJson = question.optJSONArray("options")
+                                val options = buildList {
+                                    if (optionsJson != null) {
+                                        for (optionIndex in 0 until optionsJson.length()) {
+                                            val option = optionsJson.optJSONObject(optionIndex) ?: continue
+                                            add(
+                                                CodexUserInputOption(
+                                                    label = option.optString("label"),
+                                                    description = option.optString("description")
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                                val id = question.optString("id")
+                                if (id.isNotBlank()) {
+                                    add(
+                                        CodexUserInputQuestion(
+                                            id = id,
+                                            header = question.optString("header"),
+                                            question = question.optString("question"),
+                                            isSecret = question.optBoolean("isSecret"),
+                                            options = options
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    pendingUserInput = CodexPendingUserInput(
+                        requestId = requestId,
+                        isBlocking = params.optBoolean("isBlocking"),
+                        questions = questions
+                    )
+                    userInputAnswers.clear()
+                    pendingApproval = null
+                    status = "Codex 正在等待你回答问题"
+                } else {
+                    pendingApproval = CodexPendingApproval(requestId, method, params)
+                    pendingUserInput = null
+                    status = "Codex 正在等待你的操作确认"
+                }
             }
         }
 
@@ -736,6 +805,37 @@ internal fun CodexChatScreen(
         }
     }
 
+    fun submitUserInput() {
+        val pending = state.pendingUserInput ?: return
+        val agent = state.controller ?: return
+        scope.launch {
+            try {
+                val answers = JSONObject()
+                pending.questions.forEach { question ->
+                    val values = JSONArray()
+                    state.userInputAnswers[question.id]
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { values.put(it) }
+                    answers.put(
+                        question.id,
+                        JSONObject().put("answers", values)
+                    )
+                }
+                withContext(Dispatchers.IO) {
+                    agent.respondToServerRequest(
+                        pending.requestId,
+                        JSONObject().put("answers", answers)
+                    )
+                }
+                state.pendingUserInput = null
+                state.userInputAnswers.clear()
+                state.status = "已提交回答，Codex 将继续执行"
+            } catch (error: Exception) {
+                state.error = error.message ?: "提交回答失败"
+            }
+        }
+    }
+
     fun answerApproval(decision: String) {
         val pending = state.pendingApproval ?: return
         val agent = state.controller ?: return
@@ -949,6 +1049,72 @@ internal fun CodexChatScreen(
             }
         }
 
+        state.pendingUserInput?.let { pending ->
+            Card {
+                Column(
+                    Modifier.fillMaxWidth().padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Codex 需要你回答", fontWeight = FontWeight.SemiBold)
+                    if (pending.questions.isEmpty()) {
+                        Text("收到的问题没有可显示的内容。", style = MaterialTheme.typography.bodySmall)
+                    }
+                    pending.questions.forEach { question ->
+                        Text(question.header, style = MaterialTheme.typography.labelMedium)
+                        Text(question.question, style = MaterialTheme.typography.bodyMedium)
+                        if (question.options.isNotEmpty()) {
+                            question.options.forEach { option ->
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    androidx.compose.material3.RadioButton(
+                                        selected = state.userInputAnswers[question.id] == option.label,
+                                        onClick = {
+                                            state.userInputAnswers[question.id] = option.label
+                                        }
+                                    )
+                                    Column(Modifier.weight(1f)) {
+                                        Text(option.label, style = MaterialTheme.typography.bodyMedium)
+                                        if (option.description.isNotBlank()) {
+                                            Text(option.description, style = MaterialTheme.typography.bodySmall)
+                                        }
+                                    }
+                                }
+                            }
+                            if (question.options.any { it.label.equals("其他", true) || it.label.equals("other", true) }) {
+                                OutlinedTextField(
+                                    value = state.userInputAnswers[question.id].orEmpty(),
+                                    onValueChange = { state.userInputAnswers[question.id] = it },
+                                    label = { Text("补充回答") },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        } else {
+                            OutlinedTextField(
+                                value = state.userInputAnswers[question.id].orEmpty(),
+                                onValueChange = { state.userInputAnswers[question.id] = it },
+                                label = { Text("你的回答") },
+                                singleLine = true,
+                                visualTransformation = if (question.isSecret) PasswordVisualTransformation()
+                                    else androidx.compose.ui.text.input.VisualTransformation.None,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { submitUserInput() },
+                            enabled = !state.isSubmitting && pending.questions.isNotEmpty()
+                        ) { Text("提交回答") }
+                        if (pending.isBlocking) {
+                            Text("当前任务正在等待回答", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
+        }
+
         state.pendingApproval?.let { pending ->
             Card {
                 Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1149,7 +1315,7 @@ internal fun CodexChatScreen(
                 modifier = Modifier.weight(1f),
                 minLines = 1,
                 maxLines = 4,
-                enabled = !state.isSubmitting && state.pendingApproval == null,
+                enabled = !state.isSubmitting && state.pendingApproval == null && state.pendingUserInput == null,
                 placeholder = { Text("给 Codex 安排任务…") },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = {
@@ -1164,7 +1330,7 @@ internal fun CodexChatScreen(
                     prompt = ""
                     connectAndSend(text)
                 },
-                enabled = prompt.isNotBlank() && !state.isSubmitting && state.pendingApproval == null
+                enabled = prompt.isNotBlank() && !state.isSubmitting && state.pendingApproval == null && state.pendingUserInput == null
             ) {
                 if (state.isSubmitting) CircularProgressIndicator()
                 else Text(if (state.isWorking) "追加" else "发送")
