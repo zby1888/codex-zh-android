@@ -11,6 +11,7 @@ internal class CodexAgentRuntimeFactory(context: Context) {
     private val runtimeManager = RuntimeManager(appContext)
     private val providerRepository = ProviderRepository(appContext)
     private val providerConfigurator = CodexProviderConfigurator(providerRepository)
+    private val mcpSecrets = McpServerSecretRepository(appContext)
 
     fun start(
         providerId: String? = null,
@@ -23,10 +24,17 @@ internal class CodexAgentRuntimeFactory(context: Context) {
             "Codex 私有运行环境尚未就绪：${runtimeStatus.message}"
         }
 
+        // Provider credentials and MCP secrets are injected only into the
+        // private Codex App Server process. The config file stores env-var names,
+        // never the secret values.
+        val processEnvironment = linkedMapOf<String, String>()
+        processEnvironment.putAll(providerConfigurator.environmentFor(selectedProviderId))
+        processEnvironment.putAll(mcpSecrets.environment())
+
         val client = CodexAppServerClient(
             paths = runtimeManager.paths,
             listener = listener,
-            environmentOverrides = providerConfigurator.environmentFor(selectedProviderId)
+            environmentOverrides = processEnvironment
         )
         try {
             client.connect()
