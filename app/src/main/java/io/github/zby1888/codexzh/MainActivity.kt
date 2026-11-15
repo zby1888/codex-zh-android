@@ -243,7 +243,7 @@ private fun TerminalScreen(
                             }
                         }
                     },
-                    enabled = !requestingRoot && !terminal.isRunning
+                    enabled = !requestingRoot && !busy && !terminal.isRunning
                 ) {
                     Text(if (requestingRoot) "正在等待 Root 管理器…" else "申请 / 重新检查 Root 授权")
                 }
@@ -262,7 +262,7 @@ private fun TerminalScreen(
                     Switch(
                         checked = useRootShell,
                         onCheckedChange = { useRootShell = it },
-                        enabled = rootStatus.isGranted && !terminal.isRunning
+                        enabled = rootStatus.isGranted && !busy && !terminal.isRunning
                     )
                 }
             }
