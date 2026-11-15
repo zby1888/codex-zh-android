@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -394,6 +395,11 @@ internal fun CodexChatScreen(
     var prompt by remember { mutableStateOf("") }
     var modelMenuExpanded by remember { mutableStateOf(false) }
     var effortMenuExpanded by remember { mutableStateOf(false) }
+    var actionMenuThreadId by remember { mutableStateOf<String?>(null) }
+    var renameTarget by remember { mutableStateOf<CodexThreadSummary?>(null) }
+    var renameValue by remember { mutableStateOf("") }
+    var archiveTarget by remember { mutableStateOf<CodexThreadSummary?>(null) }
+    var deleteTarget by remember { mutableStateOf<CodexThreadSummary?>(null) }
     val handler = remember { Handler(Looper.getMainLooper()) }
     val listener = remember(state, handler) {
         object : CodexAppServerClient.Listener {
@@ -489,6 +495,98 @@ internal fun CodexChatScreen(
                 state.status = "已恢复会话"
             } catch (error: Exception) {
                 state.error = error.message?.take(600) ?: "恢复会话失败"
+            } finally {
+                state.isSubmitting = false
+            }
+        }
+    }
+
+    fun forkThread(summary: CodexThreadSummary) {
+        scope.launch {
+            state.isSubmitting = true
+            state.error = null
+            try {
+                val agent = ensureAgent()
+                val forked = withContext(Dispatchers.IO) {
+                    agent.forkThread(summary.id)
+                }
+                val history = withContext(Dispatchers.IO) {
+                    agent.listItems(forked.id, limit = 100, sortDirection = "asc")
+                }
+                state.threadId = forked.id
+                state.workingDirectory = summary.workingDirectory
+                state.activeTurnId = null
+                state.isWorking = false
+                state.restoreHistory(history)
+                state.showRecentThreads = false
+                state.status = "已从选定会话创建分支"
+            } catch (error: Exception) {
+                state.error = error.message?.take(600) ?: "创建会话分支失败"
+            } finally {
+                state.isSubmitting = false
+            }
+        }
+    }
+
+    fun renameThread(summary: CodexThreadSummary, newName: String) {
+        scope.launch {
+            state.isSubmitting = true
+            state.error = null
+            try {
+                val agent = ensureAgent()
+                withContext(Dispatchers.IO) { agent.renameThread(summary.id, newName) }
+                state.status = "会话名称已更新"
+                refreshThreads()
+            } catch (error: Exception) {
+                state.error = error.message?.take(600) ?: "重命名会话失败"
+            } finally {
+                state.isSubmitting = false
+            }
+        }
+    }
+
+    fun archiveThread(summary: CodexThreadSummary) {
+        scope.launch {
+            state.isSubmitting = true
+            state.error = null
+            try {
+                val agent = ensureAgent()
+                withContext(Dispatchers.IO) { agent.archiveThread(summary.id) }
+                if (state.threadId == summary.id) {
+                    state.threadId = null
+                    state.workingDirectory = null
+                    state.activeTurnId = null
+                    state.entries.clear()
+                    state.isWorking = false
+                }
+                state.status = "会话已归档"
+                refreshThreads()
+            } catch (error: Exception) {
+                state.error = error.message?.take(600) ?: "归档会话失败"
+            } finally {
+                state.isSubmitting = false
+            }
+        }
+    }
+
+    fun deleteThread(summary: CodexThreadSummary) {
+        scope.launch {
+            state.isSubmitting = true
+            state.error = null
+            try {
+                val agent = ensureAgent()
+                withContext(Dispatchers.IO) { agent.deleteThread(summary.id) }
+                if (state.threadId == summary.id) {
+                    state.threadId = null
+                    state.workingDirectory = null
+                    state.activeTurnId = null
+                    state.entries.clear()
+                    state.isWorking = false
+                }
+                state.status = "会话已删除"
+                refreshThreads()
+            } catch (error: Exception) {
+                state.error = error.message?.take(600) ?: "删除会话失败"
             } finally {
                 state.isSubmitting = false
             }
@@ -603,6 +701,70 @@ internal fun CodexChatScreen(
                 state.error = error.message ?: "拒绝请求失败"
             }
         }
+    }
+
+    renameTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { renameTarget = null },
+            title = { Text("重命名会话") },
+            text = {
+                OutlinedTextField(
+                    value = renameValue,
+                    onValueChange = { renameValue = it },
+                    singleLine = true,
+                    label = { Text("会话名称") }
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val name = renameValue.trim()
+                        if (name.isNotBlank()) {
+                            renameTarget = null
+                            renameThread(target, name)
+                        }
+                    },
+                    enabled = renameValue.isNotBlank() && !state.isSubmitting
+                ) { Text("保存") }
+            },
+            dismissButton = { TextButton(onClick = { renameTarget = null }) { Text("取消") } }
+        )
+    }
+
+    archiveTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { archiveTarget = null },
+            title = { Text("归档会话？") },
+            text = { Text("“${target.title}”会从最近会话列表移到已归档列表。以后仍可在归档列表中恢复。") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        archiveTarget = null
+                        archiveThread(target)
+                    },
+                    enabled = !state.isSubmitting
+                ) { Text("归档") }
+            },
+            dismissButton = { TextButton(onClick = { archiveTarget = null }) { Text("取消") } }
+        )
+    }
+
+    deleteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("永久删除会话？") },
+            text = { Text("将从 Codex 本地会话记录中删除“${target.title}”。此操作无法撤销。") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        deleteTarget = null
+                        deleteThread(target)
+                    },
+                    enabled = !state.isSubmitting
+                ) { Text("删除") }
+            },
+            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("取消") } }
+        )
     }
 
     Column(
@@ -806,18 +968,70 @@ internal fun CodexChatScreen(
                     } else {
                         LazyColumn(Modifier.height(180.dp)) {
                             items(state.recentThreads, key = { it.id }) { summary ->
-                                TextButton(
-                                    onClick = { resumeThread(summary) },
+                                Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    enabled = !state.isSubmitting
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    Column(Modifier.fillMaxWidth()) {
-                                        Text(summary.title, maxLines = 1)
-                                        if (summary.workingDirectory.isNotBlank()) {
-                                            Text(
-                                                summary.workingDirectory,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                maxLines = 1
+                                    TextButton(
+                                        onClick = { resumeThread(summary) },
+                                        modifier = Modifier.weight(1f),
+                                        enabled = !state.isSubmitting
+                                    ) {
+                                        Column(Modifier.fillMaxWidth()) {
+                                            Text(summary.title, maxLines = 1)
+                                            if (summary.workingDirectory.isNotBlank()) {
+                                                Text(
+                                                    summary.workingDirectory,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    maxLines = 1
+                                                )
+                                            }
+                                            if (summary.preview.isNotBlank() && summary.preview != summary.title) {
+                                                Text(
+                                                    summary.preview,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    maxLines = 1
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Box {
+                                        TextButton(
+                                            onClick = { actionMenuThreadId = summary.id },
+                                            enabled = !state.isSubmitting
+                                        ) { Text("更多") }
+                                        DropdownMenu(
+                                            expanded = actionMenuThreadId == summary.id,
+                                            onDismissRequest = { actionMenuThreadId = null }
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = { Text("从这里分支") },
+                                                onClick = {
+                                                    actionMenuThreadId = null
+                                                    forkThread(summary)
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("重命名") },
+                                                onClick = {
+                                                    actionMenuThreadId = null
+                                                    renameTarget = summary
+                                                    renameValue = summary.title
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("归档") },
+                                                onClick = {
+                                                    actionMenuThreadId = null
+                                                    archiveTarget = summary
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("删除会话") },
+                                                onClick = {
+                                                    actionMenuThreadId = null
+                                                    deleteTarget = summary
+                                                }
                                             )
                                         }
                                     }
