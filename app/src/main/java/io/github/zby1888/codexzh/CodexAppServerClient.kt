@@ -84,7 +84,7 @@ internal class CodexAppServerClient(
         childEnvironment.putAll(paths.environment())
         environmentOverrides.forEach { (key, value) ->
             require(key.matches(Regex("[A-Z_][A-Z0-9_]{0,127}"))) { "运行环境变量名称不合法" }
-            require(!value.contains('\\u0000')) { "运行环境变量内容不合法" }
+            require(value.none { it.code == 0 }) { "运行环境变量内容不合法" }
             childEnvironment[key] = value
         }
 
