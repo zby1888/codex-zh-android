@@ -157,7 +157,8 @@ internal fun ProviderScreen(modifier: Modifier = Modifier) {
                         ) {
                             Row {
                                 Text(item.displayName, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                                if (item.isDefault) Text("默认", color = MaterialTheme.colorScheme.primary)
+                                if (item.isDefault) Text("通用默认", color = MaterialTheme.colorScheme.primary)
+                                if (item.isCodexAgentDefault) Text("Agent 默认", color = MaterialTheme.colorScheme.primary)
                             }
                             Text(item.protocol.displayName, style = MaterialTheme.typography.bodySmall)
                             Text(item.baseUrl, style = MaterialTheme.typography.bodySmall)
@@ -166,7 +167,13 @@ internal fun ProviderScreen(modifier: Modifier = Modifier) {
                                 TextButton(onClick = {
                                     repository.setDefault(item.id)
                                     refresh()
-                                }, enabled = !item.isDefault) { Text("设为默认") }
+                                }, enabled = !item.isDefault) { Text("设为通用默认") }
+                                if (item.protocol == ProviderProtocol.CODEX_RESPONSES) {
+                                    TextButton(onClick = {
+                                        repository.setDefaultCodexAgent(item.id)
+                                        refresh()
+                                    }, enabled = !item.isCodexAgentDefault) { Text("设为 Agent 默认") }
+                                }
                                 TextButton(onClick = { openEdit(item) }) { Text("编辑") }
                                 TextButton(onClick = { pendingDelete = item }) { Text("删除") }
                             }
