@@ -57,6 +57,9 @@ internal class CodexAppServerClient(
     val isAlive: Boolean
         get() = !closed.get() && process?.isAlive == true
 
+    val isInitialized: Boolean
+        get() = initialized && isAlive
+
     /**
      * Starts codex app-server and completes the mandatory initialize handshake.
      * The pinned CLI version must be validated against this protocol before release.
@@ -139,6 +142,22 @@ internal class CodexAppServerClient(
         } finally {
             pending.remove(key)
         }
+    }
+
+    /** Replies to a server-initiated JSON-RPC request (for example an approval prompt). */
+    @Synchronized
+    fun respond(requestId: Any, result: JSONObject) {
+        check(isAlive) { "Codex App Server 尚未启动或已经退出" }
+        writeMessage(JSONObject().put("id", requestId).put("result", result))
+    }
+
+    /** Rejects a server-initiated JSON-RPC request. */
+    @Synchronized
+    fun respondError(requestId: Any, code: Int, message: String, data: Any? = null) {
+        check(isAlive) { "Codex App Server 尚未启动或已经退出" }
+        val error = JSONObject().put("code", code).put("message", message)
+        if (data != null) error.put("data", data)
+        writeMessage(JSONObject().put("id", requestId).put("error", error))
     }
 
     /** Sends a JSON-RPC notification; notifications do not have an id. */
@@ -236,14 +255,22 @@ internal class CodexAppServerClient(
         process = null
         if (child != null && child.isAlive) {
             child.destroy()
-            try {
-                if (!child.waitFor(TERMINATION_GRACE_MS, TimeUnit.MILLISECONDS)) {
-                    child.destroyForcibly()
+            var finished = false
+            val waiter = Thread {
+                try {
+                    child.waitFor()
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
                 }
+            }.apply { isDaemon = true }
+            waiter.start()
+            try {
+                waiter.join(TERMINATION_GRACE_MS)
+                finished = !waiter.isAlive
             } catch (_: InterruptedException) {
-                child.destroyForcibly()
                 Thread.currentThread().interrupt()
             }
+            if (!finished) child.destroyForcibly()
         }
         io.shutdownNow()
     }
