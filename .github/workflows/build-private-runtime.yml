@@ -47,7 +47,7 @@ jobs:
 
       - name: Configure custom application prefix
         run: |
-          python3 -m py_compile scripts/prepare-private-runtime-source.py
+          python3 -m py_compile scripts/prepare-private-runtime-source.py scripts/validate-private-runtime-bootstrap.py
           python3 scripts/prepare-private-runtime-source.py vendor/termux-packages
           bash -n vendor/termux-packages/scripts/run-docker.sh
           bash -n vendor/termux-packages/scripts/build-bootstraps.sh
