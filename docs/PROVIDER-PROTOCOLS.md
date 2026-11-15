@@ -2,7 +2,7 @@
 
 配置字段：名称、协议、API 基础地址、模型 ID、自定义请求头和默认服务商。`ProviderRepository` 已建立非敏感配置存储；`SecretStore` 使用 Android Keystore 中不可导出的 AES-256-GCM 密钥加密 API Key 与自定义请求头值，密文单独保存在应用私有 SharedPreferences。普通服务商配置 JSON 不写入明文密钥。
 
-当前已完成服务商列表、添加/编辑/删除、设为默认的中文界面，以及配置数据层和加密存储层。尚未完成 Codex `config.toml` / 凭据文件适配、网络连接测试和真实中转站兼容性验证。
+当前已完成服务商列表、添加/编辑/删除、设为默认的中文界面，配置数据层、加密存储层，以及通过 App Server `config/batchWrite` 写入 Responses 兼容服务商配置的底层适配。`CodexAgentRuntimeFactory` 会把解密后的密钥和自定义请求头只注入 Codex 子进程环境，再写入环境变量引用，不把密钥写入 `config.toml`。尚未把工厂接入聊天 UI，也未完成网络连接测试和真实中转站兼容性验证。
 
 ## 两种模式
 - **Codex 智能体模式**：使用 Codex App Server。自定义 Codex 服务商需满足 Responses API 兼容性；`wire_api = "responses"` 不会把 Chat Completions 服务自动转换为 Responses。
