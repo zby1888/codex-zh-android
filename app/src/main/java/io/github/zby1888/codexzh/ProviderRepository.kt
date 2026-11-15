@@ -82,6 +82,9 @@ internal class ProviderRepository(context: Context) {
         require(credentials.customHeaders.keys.all { it.matches(Regex("[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}")) }) {
             "自定义请求头名称不合法"
         }
+        require(credentials.customHeaders.values.all { value ->
+            value.none { it == '\r' || it == '\n' }
+        }) { "自定义请求头内容不能包含换行符" }
 
         val root = readRoot()
         val wasDefault = preferences.getString(DEFAULT_PROVIDER_KEY, null) == config.id
