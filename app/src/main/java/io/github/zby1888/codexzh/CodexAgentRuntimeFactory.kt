@@ -13,9 +13,11 @@ internal class CodexAgentRuntimeFactory(context: Context) {
     private val providerConfigurator = CodexProviderConfigurator(providerRepository)
 
     fun start(
-        providerId: String,
+        providerId: String? = null,
         listener: CodexAppServerClient.Listener = NoopAppServerListener
     ): CodexAgentController {
+        val selectedProviderId = providerId ?: providerRepository.getDefaultCodexAgent()?.id
+            ?: throw IllegalStateException("请先添加并设置一个 Responses API 服务商为 Codex Agent 默认")
         val runtimeStatus = runtimeManager.inspect()
         check(runtimeStatus.phase == RuntimePhase.RUNTIME_READY) {
             "Codex 私有运行环境尚未就绪：${runtimeStatus.message}"
@@ -24,11 +26,11 @@ internal class CodexAgentRuntimeFactory(context: Context) {
         val client = CodexAppServerClient(
             paths = runtimeManager.paths,
             listener = listener,
-            environmentOverrides = providerConfigurator.environmentFor(providerId)
+            environmentOverrides = providerConfigurator.environmentFor(selectedProviderId)
         )
         try {
             client.connect()
-            providerConfigurator.applyToAppServer(client, providerId)
+            providerConfigurator.applyToAppServer(client, selectedProviderId)
             return CodexAgentController(client)
         } catch (error: Exception) {
             client.close()
