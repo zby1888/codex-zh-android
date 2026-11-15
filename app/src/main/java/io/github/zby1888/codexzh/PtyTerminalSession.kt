@@ -1,6 +1,8 @@
 package io.github.zby1888.codexzh
 
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -35,6 +37,8 @@ internal class NativePtyBridge {
 internal class PtyTerminalSession(private val paths:RuntimePaths) {
     private val bridge=NativePtyBridge()
     private val scope=CoroutineScope(SupervisorJob()+Dispatchers.IO)
+    private val cleanupScope=CoroutineScope(SupervisorJob()+Dispatchers.IO)
+    private val nativeMutex=Mutex()
     @Volatile private var handle=0L
     private var readerJob:Job?=null
 
@@ -57,14 +61,18 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
             put("PS1","\\u@codex:\\w\\$ ")
             put("HISTFILE",File(paths.home,".bash_history").absolutePath)
         }
-        val newHandle=withContext(Dispatchers.IO) {
-            bridge.nativeCreate(paths.bash.absolutePath,cwd.absolutePath,
-                environment.keys.toTypedArray(),environment.values.toTypedArray(),rows,columns)
+        val newHandle=nativeMutex.withLock {
+            withContext(Dispatchers.IO) {
+                bridge.nativeCreate(paths.bash.absolutePath,cwd.absolutePath,
+                    environment.keys.toTypedArray(),environment.values.toTypedArray(),rows,columns)
+            }
         }
         check(newHandle!=0L){"无法创建交互式 PTY"}
         this.rows=rows; this.columns=columns; handle=newHandle
         this.workingDirectory=cwd.absolutePath
-        frame=decodeSnapshot(withContext(Dispatchers.IO){bridge.nativeSnapshot(newHandle)})
+        frame=decodeSnapshot(nativeMutex.withLock {
+            withContext(Dispatchers.IO) { bridge.nativeSnapshot(newHandle) }
+        })
         isRunning=true
         message="已启动应用私有 Bash · "+cwd.name
         readerJob=scope.launch{readLoop(newHandle)}
@@ -77,7 +85,8 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
         val bytes=value.toByteArray(Charsets.UTF_8)
         scope.launch {
             try {
-                if(bridge.nativeWrite(current,bytes)!=bytes.size) publishError(current,"终端输入没有完整写入")
+                val written=nativeMutex.withLock { bridge.nativeWrite(current,bytes) }
+                if(written!=bytes.size) publishError(current,"终端输入没有完整写入")
             } catch(error:Exception) { publishError(current,error.message?:"终端写入失败") }
         }
     }
@@ -89,10 +98,11 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
         val current=handle
         if(current==0L) { frame=TerminalFrame.blank(safeRows,safeColumns); return }
         scope.launch {
-            if(bridge.nativeResize(current,safeRows,safeColumns) && handle==current) {
-                val next=runCatching{decodeSnapshot(bridge.nativeSnapshot(current))}.getOrNull()
-                if(next!=null) withContext(Dispatchers.Main.immediate){if(handle==current) frame=next}
+            val next=nativeMutex.withLock {
+                if(handle!=current || !bridge.nativeResize(current,safeRows,safeColumns)) null
+                else runCatching { decodeSnapshot(bridge.nativeSnapshot(current)) }.getOrNull()
             }
+            if(next!=null) withContext(Dispatchers.Main.immediate){if(handle==current) frame=next}
         }
     }
 
@@ -118,19 +128,25 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
         val buffer=ByteArray(16*1024)
         try {
             while(currentCoroutineContext().isActive && handle==activeHandle) {
-                val count=bridge.nativeRead(activeHandle,buffer,120)
-                if(count>0) {
-                    val next=decodeSnapshot(bridge.nativeSnapshot(activeHandle))
-                    withContext(Dispatchers.Main.immediate){if(handle==activeHandle) frame=next}
-                } else if(count<0) {
-                    val code=bridge.nativeExitCode(activeHandle)
-                    finish(activeHandle,if(code==NATIVE_RUNNING) "PTY 输入流已关闭" else "Shell 已退出，退出码："+code)
+                val result=nativeMutex.withLock {
+                    val count=bridge.nativeRead(activeHandle,buffer,120)
+                    val snapshot=if(count>0) runCatching { decodeSnapshot(bridge.nativeSnapshot(activeHandle)) }.getOrNull() else null
+                    val code=if(count<0 || count==0) bridge.nativeExitCode(activeHandle) else NATIVE_RUNNING
+                    val finalSnapshot=if(code!=NATIVE_RUNNING) {
+                        runCatching { decodeSnapshot(bridge.nativeSnapshot(activeHandle)) }.getOrNull()
+                    } else null
+                    Triple(count,code,snapshot?:finalSnapshot)
+                }
+                val (count,code,nextFrame)=result
+                if(count>0 && nextFrame!=null) {
+                    withContext(Dispatchers.Main.immediate){if(handle==activeHandle) frame=nextFrame}
+                }
+                if(count<0) {
+                    finish(activeHandle,if(code==NATIVE_RUNNING) "PTY 输入流已关闭" else "Shell 已退出，退出码："+code,nextFrame)
                     return
                 }
-                val code=bridge.nativeExitCode(activeHandle)
                 if(code!=NATIVE_RUNNING) {
-                    val finalFrame=runCatching{decodeSnapshot(bridge.nativeSnapshot(activeHandle))}.getOrNull()
-                    finish(activeHandle,"Shell 已退出，退出码："+code,finalFrame)
+                    finish(activeHandle,"Shell 已退出，退出码："+code,nextFrame)
                     return
                 }
             }
@@ -145,7 +161,7 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
                 if(finalFrame!=null) frame=finalFrame
             }
         }
-        withContext(Dispatchers.IO){runCatching{bridge.nativeClose(activeHandle)}}
+        nativeMutex.withLock { runCatching { bridge.nativeClose(activeHandle) } }
     }
     private suspend fun publishError(activeHandle:Long,detail:String) {
         withContext(Dispatchers.Main.immediate){if(handle==activeHandle)message=detail}
