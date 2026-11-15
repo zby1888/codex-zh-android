@@ -22,6 +22,8 @@ internal data class RuntimePaths(
     val env: File get() = File(bin, "env")
     val git: File get() = File(bin, "git")
     val jq: File get() = File(bin, "jq")
+    val codex: File get() = File(bin, "codex")
+    val codexCodeModeHost: File get() = File(bin, "codex-code-mode-host")
     val execPreload: File get() = File(prefix, "lib/libtermux-exec-ld-preload.so")
     val layoutMarker: File get() = File(runtimeRoot, ".layout.properties")
     val runtimeMarker: File get() = File(runtimeRoot, ".runtime.properties")
