@@ -10,11 +10,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -44,6 +46,14 @@ internal fun CodexMcpScreen(
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var showAddDialog by remember { mutableStateOf(false) }
+    var transport by remember { mutableStateOf("stdio") }
+    var serverName by remember { mutableStateOf("") }
+    var command by remember { mutableStateOf("") }
+    var argumentsText by remember { mutableStateOf("") }
+    var workingDirectory by remember { mutableStateOf("") }
+    var httpUrl by remember { mutableStateOf("") }
+    var deleteTarget by remember { mutableStateOf<String?>(null) }
 
     suspend fun ensureAgent(): CodexAgentController {
         state.controller?.takeIf { it.isConnected }?.let { return it }
@@ -58,6 +68,90 @@ internal fun CodexMcpScreen(
             CodexAgentRuntimeFactory(context).start(listener = state.appServerListener)
         }.also {
             state.controller = it
+        }
+    }
+
+    suspend fun readServers(agent: CodexAgentController) {
+        val mcp = agent.mcpController()
+        val result = withContext(Dispatchers.IO) {
+            mcp.listServers(threadId = state.threadId, limit = 50)
+        }
+        state.replaceMcpServers(result)
+    }
+
+    fun saveServer() {
+        val cleanName = serverName.trim()
+        val config = try {
+            require(cleanName.matches(Regex("[A-Za-z0-9_-]{1,64}"))) {
+                "服务名称只能使用英文字母、数字、下划线和连字符（最多 64 位）"
+            }
+            if (transport == "stdio") {
+                val cleanCommand = command.trim()
+                require(cleanCommand.isNotBlank()) { "请填写私有运行环境中的命令或程序路径" }
+                val args = argumentsText.lineSequence()
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                val config = org.json.JSONObject()
+                    .put("command", cleanCommand)
+                    .put("args", org.json.JSONArray().also { array -> args.forEach(array::put) })
+                if (workingDirectory.isNotBlank()) config.put("cwd", workingDirectory.trim())
+                config
+            } else {
+                val uri = android.net.Uri.parse(httpUrl.trim())
+                require(uri.scheme.equals("https", true) ||
+                    (uri.scheme.equals("http", true) && (uri.host == "127.0.0.1" || uri.host == "localhost"))) {
+                    "远程 MCP 地址必须使用 HTTPS；仅本机回环地址允许 HTTP"
+                }
+                require(!uri.host.isNullOrBlank()) { "MCP 服务地址格式不正确" }
+                org.json.JSONObject().put("url", httpUrl.trim().trimEnd('/'))
+            }
+        } catch (failure: Exception) {
+            error = failure.message ?: "MCP 配置不正确"
+            return
+        }
+
+        scope.launch {
+            busy = true
+            error = null
+            message = null
+            try {
+                val agent = ensureAgent()
+                withContext(Dispatchers.IO) {
+                    agent.mcpController().upsertServerConfig(cleanName, config)
+                }
+                readServers(agent)
+                showAddDialog = false
+                serverName = ""
+                command = ""
+                argumentsText = ""
+                workingDirectory = ""
+                httpUrl = ""
+                message = "MCP 服务配置已保存。请检查连接状态和工具列表。"
+            } catch (failure: Exception) {
+                error = failure.message?.take(600) ?: "保存 MCP 配置失败"
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun removeServer(name: String) {
+        scope.launch {
+            busy = true
+            error = null
+            message = null
+            try {
+                val agent = ensureAgent()
+                withContext(Dispatchers.IO) {
+                    agent.mcpController().removeServerConfig(name)
+                }
+                readServers(agent)
+                message = "已删除 MCP 服务：$name"
+            } catch (failure: Exception) {
+                error = failure.message?.take(600) ?: "删除 MCP 服务失败"
+            } finally {
+                busy = false
+            }
         }
     }
 
@@ -84,6 +178,102 @@ internal fun CodexMcpScreen(
         }
     }
 
+    if (showAddDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!busy) showAddDialog = false },
+            title = { Text("添加 MCP 服务") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "服务名只用于 Codex 配置标识。STDIO 命令必须存在于 App 自己的私有运行环境中，不会调用外部 Termux。",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (transport == "stdio") {
+                            Button(onClick = { transport = "stdio" }) { Text("本地 STDIO") }
+                            OutlinedButton(onClick = { transport = "http" }) { Text("远程 HTTP") }
+                        } else {
+                            OutlinedButton(onClick = { transport = "stdio" }) { Text("本地 STDIO") }
+                            Button(onClick = { transport = "http" }) { Text("远程 HTTP") }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = serverName,
+                        onValueChange = { serverName = it },
+                        label = { Text("服务名称") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (transport == "stdio") {
+                        OutlinedTextField(
+                            value = command,
+                            onValueChange = { command = it },
+                            label = { Text("命令或程序路径") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = argumentsText,
+                            onValueChange = { argumentsText = it },
+                            label = { Text("参数（每行一个）") },
+                            minLines = 2,
+                            maxLines = 4,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = workingDirectory,
+                            onValueChange = { workingDirectory = it },
+                            label = { Text("工作目录（可留空）") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    } else {
+                        OutlinedTextField(
+                            value = httpUrl,
+                            onValueChange = { httpUrl = it },
+                            label = { Text("MCP Streamable HTTP 地址") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Text(
+                            "当前表单先支持不带认证的服务。带 Token 或自定义请求头的安全凭据存储与注入正在单独开发，不要把密钥写进 URL。",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { saveServer() }, enabled = !busy) {
+                    Text("保存并加载")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddDialog = false }, enabled = !busy) { Text("取消") }
+            }
+        )
+    }
+
+    deleteTarget?.let { name ->
+        AlertDialog(
+            onDismissRequest = { if (!busy) deleteTarget = null },
+            title = { Text("删除 MCP 服务？") },
+            text = { Text("这会从应用私有 CODEX_HOME 的 MCP 配置中移除“$name”，并请求 Codex 重新加载配置。") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        deleteTarget = null
+                        removeServer(name)
+                    },
+                    enabled = !busy
+                ) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }, enabled = !busy) { Text("取消") }
+            }
+        )
+    }
+
     Column(
         modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -103,6 +293,7 @@ internal fun CodexMcpScreen(
                         if (busy) CircularProgressIndicator()
                         else Text(if (state.controller?.isConnected == true) "刷新服务状态" else "连接 Codex 并读取")
                     }
+                    OutlinedButton(onClick = { showAddDialog = true }, enabled = !busy) { Text("添加 MCP") }
                     OutlinedButton(onClick = onOpenProviders) { Text("服务商设置") }
                 }
                 Text(
@@ -167,6 +358,10 @@ internal fun CodexMcpScreen(
                             if (server.toolNames.size > 30) {
                                 Text("还有 ${server.toolNames.size - 30} 个工具…", style = MaterialTheme.typography.labelSmall)
                             }
+                            TextButton(
+                                onClick = { deleteTarget = server.name },
+                                enabled = !busy
+                            ) { Text("删除此服务", color = MaterialTheme.colorScheme.error) }
                         }
                     }
                 }
