@@ -254,7 +254,7 @@ private fun TerminalScreen(
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text("本次终端使用 Root 身份", fontWeight = FontWeight.Medium)
                         Text(
-                            "只影响手动启动的这个终端；Codex Agent 和普通终端仍使用应用普通身份。",
+                            "只影响这个 Root 终端；Agent 凭据不会传给它。Root 在项目里新建的文件可能归 root 所有，日常改代码和构建请用 Codex Agent / 普通终端。",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
