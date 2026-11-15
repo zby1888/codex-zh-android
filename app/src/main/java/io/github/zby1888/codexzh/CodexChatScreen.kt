@@ -222,7 +222,19 @@ internal class CodexChatUiState {
             }
             "item/started" -> handleItem(params.optJSONObject("item"), started = true)
             "item/completed" -> handleItem(params.optJSONObject("item"), started = false)
-            "fileChange/patchUpdated" -> {
+            "item/plan/delta" -> {
+                val itemId = params.optString("itemId")
+                append("plan:$itemId", "执行计划", params.optString("delta"), true)
+            }
+            "item/reasoning/summaryTextDelta" -> {
+                val itemId = params.optString("itemId")
+                append("reasoning:$itemId", "思考摘要", params.optString("delta"), true)
+            }
+            "item/mcpToolCall/progress" -> {
+                val itemId = params.optString("itemId")
+                append("mcp:$itemId", "MCP 工具进度", params.optString("message"), true)
+            }
+            "item/fileChange/patchUpdated" -> {
                 val changes = params.optJSONArray("changes")
                 val names = buildList {
                     if (changes != null) {
