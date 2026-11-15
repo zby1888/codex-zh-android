@@ -13,7 +13,7 @@
 - 已实现请求 ID 与响应关联、初始化握手、通知分发、服务端请求回调、服务端请求响应/拒绝、进程退出处理和连接关闭。
 - 已新增 `CodexAgentController`，封装 model/list、thread/start、thread/resume、thread/list、thread/turns/list、thread/items/list、thread/fork、thread/archive、thread/unarchive、thread/delete、turn/start、turn/steer 和 turn/interrupt。
 - Agent 协议进程与交互式 PTY 终端分离；该类不得复用终端的 stdin/stdout。
-- 尚未接入聊天 UI、审批界面、会话存储或真实 Android 设备端到端测试。服务商管理界面和配置注入底层已实现，但连接测试与真实第三方中转站兼容性尚未验证。当前仍不能视为完整 Agent 功能。
+- 尚未接入聊天 UI、审批界面、MCP 管理 UI、会话存储或真实 Android 设备端到端测试。MCP 协议操作层已建立，但配置编辑、审批交互和本地 STDIO MCP 运行时仍待实现。服务商管理界面和配置注入底层已实现，但连接测试与真实第三方中转站兼容性尚未验证。当前仍不能视为完整 Agent 功能。
 
 ## 协议握手
 
