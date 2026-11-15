@@ -1,11 +1,19 @@
 # Codex App Server 接入设计
 
+## 协议版本依据
+
+- Codex 源码标签：`rust-v0.169.0`。
+- 该标签解析后的源码提交：`d32063f96c2dff1dc96af839b3952abb6acfeda4`。
+- 该版本的协议定义位于 `codex-rs/app-server-protocol/schema/json/v2/`；初始化参数位于 `schema/json/v1/InitializeParams.json`。
+- Android 侧请求字段必须以这份固定版本 schema 为准。不要直接把最新文档中的新字段复制到旧版本客户端。
+
 ## 当前实现状态
 
 - 已新增 `CodexAppServerClient`：在应用私有运行时启动 `codex app-server --listen stdio://`，通过 JSONL 读写 JSON-RPC 消息。
 - 已实现请求 ID 与响应关联、初始化握手、通知分发、服务端请求回调、服务端请求响应/拒绝、进程退出处理和连接关闭。
+- 已新增 `CodexAgentController`，封装 model/list、thread/start、thread/resume、thread/list、thread/turns/list、thread/items/list、thread/fork、thread/archive、thread/unarchive、thread/delete、turn/start、turn/steer 和 turn/interrupt。
 - Agent 协议进程与交互式 PTY 终端分离；该类不得复用终端的 stdin/stdout。
-- 尚未接入聊天 UI、服务商配置、审批界面、会话存储或真实 Android 设备端到端测试。当前只能视为第一层通信骨架。
+- 尚未接入聊天 UI、服务商配置、审批界面、会话存储或真实 Android 设备端到端测试。当前只能视为通信层和基础会话控制层，不能视为完整 Agent 功能。
 
 ## 协议握手
 
