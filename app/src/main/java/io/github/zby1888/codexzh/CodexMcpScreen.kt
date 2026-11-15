@@ -58,6 +58,7 @@ internal fun CodexMcpScreen(
     var environmentText by remember { mutableStateOf("") }
     var httpUrl by remember { mutableStateOf("") }
     var bearerToken by remember { mutableStateOf("") }
+    var httpHeadersText by remember { mutableStateOf("") }
     var deleteTarget by remember { mutableStateOf<String?>(null) }
 
     suspend fun ensureAgent(): CodexAgentController {
@@ -87,6 +88,7 @@ internal fun CodexMcpScreen(
     fun saveServer() {
         val cleanName = serverName.trim()
         val secretValues = linkedMapOf<String, String>()
+        val headerSecretKeys = linkedMapOf<String, String>()
         val config = try {
             require(cleanName.matches(Regex("[A-Za-z0-9_-]{1,64}"))) {
                 "服务名称只能使用英文字母、数字、下划线和连字符（最多 64 位）"
@@ -114,6 +116,11 @@ internal fun CodexMcpScreen(
                 }
                 require(!uri.host.isNullOrBlank()) { "MCP 服务地址格式不正确" }
                 if (bearerToken.isNotBlank()) secretValues["BEARER_TOKEN"] = bearerToken
+                parseHttpHeaderLines(httpHeadersText).entries.forEachIndexed { index, entry ->
+                    val secretKey = "HTTP_HEADER_${index + 1}"
+                    secretValues[secretKey] = entry.value
+                    headerSecretKeys[entry.key] = secretKey
+                }
                 org.json.JSONObject().put("url", httpUrl.trim().trimEnd('/'))
             }
         } catch (failure: Exception) {
@@ -140,6 +147,17 @@ internal fun CodexMcpScreen(
                     envNames["BEARER_TOKEN"]?.let {
                         config.put("bearer_token_env_var", it)
                     }
+                    if (headerSecretKeys.isNotEmpty()) {
+                        val environmentHeaders = org.json.JSONObject()
+                        headerSecretKeys.forEach { (headerName, secretKey) ->
+                            envNames[secretKey]?.let { environmentName ->
+                                environmentHeaders.put(headerName, environmentName)
+                            }
+                        }
+                        if (environmentHeaders.length() > 0) {
+                            config.put("env_http_headers", environmentHeaders)
+                        }
+                    }
                 }
                 withContext(Dispatchers.IO) {
                     agent.mcpController().upsertServerConfig(cleanName, config)
@@ -156,6 +174,7 @@ internal fun CodexMcpScreen(
                 environmentText = ""
                 httpUrl = ""
                 bearerToken = ""
+                httpHeadersText = ""
                 message = if (secretValues.isNotEmpty()) {
                     "MCP 配置已保存。密钥已加密；重启 Codex 后新环境变量才会生效。"
                 } else {
@@ -319,9 +338,24 @@ internal fun CodexMcpScreen(
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth()
                         )
+                        OutlinedTextField(
+                            value = bearerToken,
+                            onValueChange = { bearerToken = it },
+                            label = { Text("Bearer Token（可留空）") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation()
+                        )
+                        OutlinedTextField(
+                            value = httpHeadersText,
+                            onValueChange = { httpHeadersText = it },
+                            label = { Text("自定义请求头（每行 Header-Name: Value）") },
+                            minLines = 2,
+                            maxLines = 4,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                         Text(
-                            "当前表单先支持不带认证的服务。带 Token 或自定义请求头的安全凭据存储与注入正在单独开发，不要把密钥写进 URL。",
-                            color = MaterialTheme.colorScheme.error,
+                            "Bearer Token 和自定义请求头的值会使用 Android Keystore 加密保存，不会写进 config.toml 或日志。保存后需重启 Codex 才会注入新凭据。",
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
@@ -547,3 +581,23 @@ private fun parseEnvironmentLines(text: String): Map<String, String> {
     return result
 }
 
+
+private fun parseHttpHeaderLines(text: String): Map<String, String> {
+    val headers = linkedMapOf<String, String>()
+    text.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.forEach { line ->
+        val separator = line.indexOf(':')
+        require(separator > 0) { "请求头格式不正确：$line。请使用 Header-Name: Value" }
+        val name = line.substring(0, separator).trim()
+        val value = line.substring(separator + 1).trim()
+        require(name.matches(Regex("[A-Za-z0-9-]+"))) {
+            "请求头名称不合法：$name"
+        }
+        require(value.isNotEmpty()) { "请求头值不能为空：$name" }
+        require(value.none { it == '\r' || it == '\n' }) {
+            "请求头值不能包含换行符：$name"
+        }
+        require(!headers.containsKey(name)) { "请求头重复：$name" }
+        headers[name] = value
+    }
+    return headers
+}
