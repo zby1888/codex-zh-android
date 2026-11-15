@@ -126,7 +126,7 @@ Java_io_github_zby1888_codexzh_NativePtyBridge_nativeCreate(
         auto value=static_cast<jstring>(env->GetObjectArrayElement(argumentValues,i));
         const std::string argument=fromJava(env,value);
         if(value)env->DeleteLocalRef(value);
-        if(argument.empty()||argument.find('\\0')!=std::string::npos) {
+        if(argument.empty()||argument.find('\0')!=std::string::npos) {
             throwState(env,"Shell 启动参数包含不合法内容");return 0;
         }
         argumentStorage.push_back(argument);
