@@ -87,6 +87,7 @@ internal class CodexChatUiState {
     var workingDirectory by mutableStateOf<String?>(null)
     var activeTurnId by mutableStateOf<String?>(null)
     var showRecentThreads by mutableStateOf(false)
+    var showArchivedThreads by mutableStateOf(false)
     val recentThreads = mutableStateListOf<CodexThreadSummary>()
     val models = mutableStateListOf<CodexModelOption>()
     var selectedModelId by mutableStateOf<String?>(null)
@@ -443,7 +444,9 @@ internal fun CodexChatScreen(
     }
 
     suspend fun loadThreads(agent: CodexAgentController) {
-        val response = withContext(Dispatchers.IO) { agent.listThreads(limit = 30) }
+        val response = withContext(Dispatchers.IO) {
+            agent.listThreads(archived = state.showArchivedThreads, limit = 30)
+        }
         state.replaceRecentThreads(response)
         state.showRecentThreads = true
     }
@@ -564,10 +567,29 @@ internal fun CodexChatScreen(
                     state.entries.clear()
                     state.isWorking = false
                 }
+                state.showArchivedThreads = false
                 state.status = "会话已归档"
                 loadThreads(agent)
             } catch (error: Exception) {
                 state.error = error.message?.take(600) ?: "归档会话失败"
+            } finally {
+                state.isSubmitting = false
+            }
+        }
+    }
+
+    fun unarchiveThread(summary: CodexThreadSummary) {
+        scope.launch {
+            state.isSubmitting = true
+            state.error = null
+            try {
+                val agent = ensureAgent()
+                withContext(Dispatchers.IO) { agent.unarchiveThread(summary.id) }
+                state.showArchivedThreads = false
+                state.status = "会话已恢复到最近列表"
+                loadThreads(agent)
+            } catch (error: Exception) {
+                state.error = error.message?.take(600) ?: "恢复归档会话失败"
             } finally {
                 state.isSubmitting = false
             }
@@ -967,7 +989,30 @@ internal fun CodexChatScreen(
                     Modifier.fillMaxWidth().padding(8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Text("最近会话", fontWeight = FontWeight.SemiBold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            if (state.showArchivedThreads) "已归档会话" else "最近会话",
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(
+                            onClick = {
+                                state.showArchivedThreads = false
+                                refreshThreads()
+                            },
+                            enabled = !state.isSubmitting && state.showArchivedThreads
+                        ) { Text("最近") }
+                        TextButton(
+                            onClick = {
+                                state.showArchivedThreads = true
+                                refreshThreads()
+                            },
+                            enabled = !state.isSubmitting && !state.showArchivedThreads
+                        ) { Text("已归档") }
+                    }
                     if (state.recentThreads.isEmpty()) {
                         Text("还没有可恢复的会话", style = MaterialTheme.typography.bodySmall)
                     } else {
@@ -1025,10 +1070,11 @@ internal fun CodexChatScreen(
                                                 }
                                             )
                                             DropdownMenuItem(
-                                                text = { Text("归档") },
+                                                text = { Text(if (state.showArchivedThreads) "取消归档" else "归档") },
                                                 onClick = {
                                                     actionMenuThreadId = null
-                                                    archiveTarget = summary
+                                                    if (state.showArchivedThreads) unarchiveThread(summary)
+                                                    else archiveTarget = summary
                                                 }
                                             )
                                             DropdownMenuItem(
