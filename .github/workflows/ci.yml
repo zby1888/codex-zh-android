@@ -1,5 +1,11 @@
 name: Android UI scaffold
 
+# Keep only the newest UI build for a PR/branch. Repeated documentation
+# commits should not launch several Gradle builds that compete for the runner.
+concurrency:
+  group: android-ui-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [main]
