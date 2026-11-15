@@ -19,6 +19,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
@@ -50,6 +52,15 @@ internal data class CodexChatEntry(
     val isActivity: Boolean = false
 )
 
+internal data class CodexModelOption(
+    val id: String,
+    val displayName: String,
+    val description: String,
+    val defaultReasoningEffort: String,
+    val reasoningEfforts: List<String>,
+    val isDefault: Boolean
+)
+
 internal data class CodexThreadSummary(
     val id: String,
     val title: String,
@@ -74,6 +85,9 @@ internal class CodexChatUiState {
     var activeTurnId by mutableStateOf<String?>(null)
     var showRecentThreads by mutableStateOf(false)
     val recentThreads = mutableStateListOf<CodexThreadSummary>()
+    val models = mutableStateListOf<CodexModelOption>()
+    var selectedModelId by mutableStateOf<String?>(null)
+    var selectedReasoningEffort by mutableStateOf<String?>(null)
     var isWorking by mutableStateOf(false)
     var isSubmitting by mutableStateOf(false)
     var status by mutableStateOf("尚未连接 Codex")
@@ -107,6 +121,54 @@ internal class CodexChatUiState {
         val next = if (index < 0) CodexChatEntry(id, title, text, isActivity = isActivity)
         else entries[index].copy(title = title, text = text, isActivity = isActivity)
         if (index < 0) entries.add(next) else entries[index] = next
+    }
+
+    fun replaceModels(response: JSONObject) {
+        val next = mutableListOf<CodexModelOption>()
+        val data = response.optJSONArray("data") ?: JSONArray()
+        for (index in 0 until data.length()) {
+            val model = data.optJSONObject(index) ?: continue
+            val id = model.optString("id").ifBlank { model.optString("model") }
+            if (id.isBlank()) continue
+            val efforts = model.optJSONArray("supportedReasoningEfforts") ?: JSONArray()
+            val effortValues = buildList {
+                for (effortIndex in 0 until efforts.length()) {
+                    val effort = efforts.optJSONObject(effortIndex) ?: continue
+                    val value = effort.optString("reasoningEffort")
+                    if (value.isNotBlank()) add(value)
+                }
+            }
+            next.add(
+                CodexModelOption(
+                    id = id,
+                    displayName = model.optString("displayName").ifBlank { id },
+                    description = model.optString("description"),
+                    defaultReasoningEffort = model.optString("defaultReasoningEffort").ifBlank {
+                        effortValues.firstOrNull().orEmpty()
+                    },
+                    reasoningEfforts = effortValues,
+                    isDefault = model.optBoolean("isDefault")
+                )
+            )
+        }
+        models.clear()
+        models.addAll(next)
+        val selected = models.firstOrNull { it.id == selectedModelId }
+            ?: models.firstOrNull { it.isDefault }
+            ?: models.firstOrNull()
+        selectedModelId = selected?.id
+        if (selected != null && selectedReasoningEffort !in selected.reasoningEfforts) {
+            selectedReasoningEffort = selected.defaultReasoningEffort.ifBlank {
+                selected.reasoningEfforts.firstOrNull()
+            }
+        }
+    }
+
+    fun selectModel(model: CodexModelOption) {
+        selectedModelId = model.id
+        selectedReasoningEffort = model.defaultReasoningEffort.ifBlank {
+            model.reasoningEfforts.firstOrNull()
+        }
     }
 
     fun replaceRecentThreads(response: JSONObject) {
@@ -330,6 +392,8 @@ internal fun CodexChatScreen(
     val runtimeManager = remember(context) { RuntimeManager(context) }
     val providerRepository = remember(context) { ProviderRepository(context) }
     var prompt by remember { mutableStateOf("") }
+    var modelMenuExpanded by remember { mutableStateOf(false) }
+    var effortMenuExpanded by remember { mutableStateOf(false) }
     val handler = remember { Handler(Looper.getMainLooper()) }
     val listener = remember(state, handler) {
         object : CodexAppServerClient.Listener {
@@ -381,6 +445,23 @@ internal fun CodexChatScreen(
                 state.showRecentThreads = true
             } catch (error: Exception) {
                 state.error = error.message?.take(600) ?: "读取会话列表失败"
+            } finally {
+                state.isSubmitting = false
+            }
+        }
+    }
+
+    fun refreshModels() {
+        scope.launch {
+            state.isSubmitting = true
+            state.error = null
+            try {
+                val agent = ensureAgent()
+                val response = withContext(Dispatchers.IO) { agent.listModels(includeHidden = false) }
+                state.replaceModels(response)
+                state.status = if (state.models.isEmpty()) "服务商没有返回可用模型" else "已更新模型列表"
+            } catch (error: Exception) {
+                state.error = error.message?.take(600) ?: "读取模型列表失败"
             } finally {
                 state.isSubmitting = false
             }
@@ -443,7 +524,7 @@ internal fun CodexChatScreen(
                         state.workingDirectory ?: defaultWorkspace(runtimeManager.paths.home)
                     }
                     withContext(Dispatchers.IO) {
-                        agent.startThread(cwd).id
+                        agent.startThread(cwd, model = state.selectedModelId).id
                     }.also {
                         state.threadId = it
                         state.workingDirectory = cwd
@@ -461,7 +542,13 @@ internal fun CodexChatScreen(
                     val cwd = state.workingDirectory ?: defaultWorkspace(runtimeManager.paths.home)
                     state.isWorking = true
                     val turn = withContext(Dispatchers.IO) {
-                        agent.startTurn(threadId, text, cwd)
+                        agent.startTurn(
+                            threadId,
+                            text,
+                            cwd,
+                            model = state.selectedModelId,
+                            effort = state.selectedReasoningEffort
+                        )
                     }
                     if (state.isWorking) state.activeTurnId = turn.id
                     state.status = if (state.isWorking) "已发送，正在等待 Codex 回复" else state.status
@@ -535,6 +622,83 @@ internal fun CodexChatScreen(
                 if (providerRepository.getDefaultCodexAgent() == null) {
                     Text("还没有设置 Codex Agent 服务商。", style = MaterialTheme.typography.bodySmall)
                     OutlinedButton(onClick = onOpenProviders) { Text("去设置服务商") }
+                }
+            }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.weight(1f)) {
+                Box {
+                    OutlinedButton(
+                        onClick = {
+                            if (state.models.isEmpty()) refreshModels()
+                            else modelMenuExpanded = true
+                        },
+                        enabled = !state.isSubmitting
+                    ) {
+                        Text(
+                            state.models.firstOrNull { it.id == state.selectedModelId }?.displayName
+                                ?: "读取模型列表"
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = modelMenuExpanded,
+                        onDismissRequest = { modelMenuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("刷新模型列表") },
+                            onClick = {
+                                modelMenuExpanded = false
+                                refreshModels()
+                            }
+                        )
+                        state.models.forEach { model ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(model.displayName)
+                                        if (model.description.isNotBlank()) {
+                                            Text(
+                                                model.description,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                maxLines = 2
+                                            )
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    state.selectModel(model)
+                                    modelMenuExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+            Column {
+                Box {
+                    OutlinedButton(
+                        onClick = { effortMenuExpanded = true },
+                        enabled = state.models.firstOrNull { it.id == state.selectedModelId }
+                            ?.reasoningEfforts?.isNotEmpty() == true
+                    ) {
+                        Text(state.selectedReasoningEffort ?: "默认推理")
+                    }
+                    DropdownMenu(
+                        expanded = effortMenuExpanded,
+                        onDismissRequest = { effortMenuExpanded = false }
+                    ) {
+                        state.models.firstOrNull { it.id == state.selectedModelId }
+                            ?.reasoningEfforts?.forEach { effort ->
+                                DropdownMenuItem(
+                                    text = { Text(effort) },
+                                    onClick = {
+                                        state.selectedReasoningEffort = effort
+                                        effortMenuExpanded = false
+                                    }
+                                )
+                            }
+                    }
                 }
             }
         }
