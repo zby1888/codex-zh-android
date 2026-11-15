@@ -64,6 +64,15 @@ internal data class CodexModelOption(
     val isDefault: Boolean
 )
 
+internal data class CodexMcpServerSummary(
+    val name: String,
+    val runtimeStatus: String,
+    val authStatus: String,
+    val httpOrigin: String,
+    val toolNames: List<String>,
+    val error: String?
+)
+
 internal data class CodexThreadSummary(
     val id: String,
     val title: String,
