@@ -242,7 +242,7 @@ internal class RuntimeBootstrapInstaller(
     }
 
     private fun verifyInstalledFiles() {
-        val required = listOf(paths.bash, paths.env, paths.git, paths.jq, paths.execPreload)
+        val required = listOf(paths.bash, paths.env, paths.git, paths.execPreload)
         val missing = required.filterNot { it.exists() }
         check(missing.isEmpty()) {
             "运行时关键文件缺失：${missing.joinToString { it.relativeTo(paths.prefix).path }}"
