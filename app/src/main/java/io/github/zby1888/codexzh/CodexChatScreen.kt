@@ -440,15 +440,18 @@ internal fun CodexChatScreen(
         }
     }
 
+    suspend fun loadThreads(agent: CodexAgentController) {
+        val response = withContext(Dispatchers.IO) { agent.listThreads(limit = 30) }
+        state.replaceRecentThreads(response)
+        state.showRecentThreads = true
+    }
+
     fun refreshThreads() {
         scope.launch {
             state.isSubmitting = true
             state.error = null
             try {
-                val agent = ensureAgent()
-                val response = withContext(Dispatchers.IO) { agent.listThreads(limit = 30) }
-                state.replaceRecentThreads(response)
-                state.showRecentThreads = true
+                loadThreads(ensureAgent())
             } catch (error: Exception) {
                 state.error = error.message?.take(600) ?: "读取会话列表失败"
             } finally {
@@ -536,7 +539,7 @@ internal fun CodexChatScreen(
                 val agent = ensureAgent()
                 withContext(Dispatchers.IO) { agent.renameThread(summary.id, newName) }
                 state.status = "会话名称已更新"
-                refreshThreads()
+                loadThreads(agent)
             } catch (error: Exception) {
                 state.error = error.message?.take(600) ?: "重命名会话失败"
             } finally {
@@ -560,7 +563,7 @@ internal fun CodexChatScreen(
                     state.isWorking = false
                 }
                 state.status = "会话已归档"
-                refreshThreads()
+                loadThreads(agent)
             } catch (error: Exception) {
                 state.error = error.message?.take(600) ?: "归档会话失败"
             } finally {
@@ -584,7 +587,7 @@ internal fun CodexChatScreen(
                     state.isWorking = false
                 }
                 state.status = "会话已删除"
-                refreshThreads()
+                loadThreads(agent)
             } catch (error: Exception) {
                 state.error = error.message?.take(600) ?: "删除会话失败"
             } finally {
