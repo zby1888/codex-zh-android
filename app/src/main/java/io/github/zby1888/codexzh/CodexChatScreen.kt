@@ -271,7 +271,7 @@ internal fun CodexChatScreen(
                         "还没有设置 Codex Agent 服务商。请先添加兼容 Responses API 的服务商。"
                     }
                     withContext(Dispatchers.IO) {
-                        CodexAgentRuntimeFactory(context).start(listener)
+                        CodexAgentRuntimeFactory(context).start(listener = listener)
                     }.also {
                         state.controller = it
                         state.status = "已连接 Codex App Server"
