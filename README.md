@@ -14,7 +14,7 @@
 - **中文由 App 自己负责**：Android UI、提示、设置和错误说明均由本项目维护中文文案。汉化版 CLI 可以作为以后可选方案，但**绝不能成为 APK 主线构建的强制依赖**。
 - **诚实标记完成度**：UI 骨架、Runtime、CLI/App Server、完整 APK 和实机功能测试分开验收；没有通过的能力标记为未实现或待验证，不能仅凭 UI 构建成功宣称完成。
 
-> **当前状态（开发分支）：** Android UI 骨架已多次通过 Debug APK 编译；Codex App Server 聊天接线已包含会话创建/恢复、模型和推理强度、流式消息、命令输出、Diff、基础审批和交互式提问。会话列表、分支/重命名/归档/删除、私有项目工作区、目标/预算、上下文压缩和未提交改动审查入口也已写入界面。MCP 页面已有服务状态、STDIO / Streamable HTTP 配置、OAuth 入口和 Keystore 凭据注入；最新一次又加入 Bearer Token 与自定义 HTTP Header 表单，正在由 UI Build #103 验证。**这些 UI 构建不包含完整 ARM64 Runtime，也不代表 Agent、MCP 或第三方中转站已经真机端到端可用。** 真正 PTY 终端仍未实现；其模块边界和许可证门槛见 [PTY 设计](docs/TERMINAL-PTY-ARCHITECTURE.md)。
+> **当前状态（开发分支）：** Android UI 骨架已多次通过 Debug APK 编译；Codex App Server 聊天接线已包含会话创建/恢复、模型和推理强度、流式消息、命令输出、Diff、基础审批和交互式提问。会话列表、分支/重命名/归档/删除、私有项目工作区、目标/预算、上下文压缩和未提交改动审查入口也已写入界面。MCP 页面已有服务状态、STDIO / Streamable HTTP 配置、OAuth 入口和 Keystore 凭据注入；Bearer Token 与自定义 HTTP Header 表单已在 UI-only Build #103 通过 Kotlin 编译、APK 组装和上传验证。**这些 UI 构建不包含完整 ARM64 Runtime，也不代表 Agent、MCP 或第三方中转站已经真机端到端可用。** 真正 PTY 终端仍未实现；其模块边界和许可证门槛见 [PTY 设计](docs/TERMINAL-PTY-ARCHITECTURE.md)。
 
 - 应用名：Codex 中文版
 - Android applicationId：`com.codex.zhou`
