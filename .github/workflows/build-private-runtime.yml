@@ -73,12 +73,14 @@ jobs:
       # Exact cache only: package markers, prefix, sources, Rustup/Cargo and
       # matching .debs must always come from the same package profile.
       - name: Restore exact private ARM64 package cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.termux-build
             vendor/termux-packages/output
-          key: termux-private-runtime-v2-${{ hashFiles('runtime/sources.lock.yml', 'runtime/private-runtime-config.json', 'scripts/prepare-private-runtime-source.py') }}
+          key: termux-private-runtime-v3-${{ hashFiles('runtime/sources.lock.yml', 'runtime/private-runtime-config.json', 'scripts/prepare-private-runtime-source.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            termux-private-runtime-v3-${{ hashFiles('runtime/sources.lock.yml', 'runtime/private-runtime-config.json', 'scripts/prepare-private-runtime-source.py') }}-
 
       - name: Prepare writable Termux state directories
         run: |
@@ -105,14 +107,7 @@ jobs:
             --cache-from type=gha,scope=codex-termux-builder-v1 \
             --cache-to type=gha,scope=codex-termux-builder-v1,mode=max \
             --file Dockerfile --tag codex-runtime-builder:${{ github.sha }} .
-      - name: Pull pinned Ubuntu builder base image
-        run: docker pull ubuntu:26.04
 
-      - name: Build package-builder image from pinned source
-        working-directory: vendor/termux-packages/scripts
-        env:
-          DOCKER_BUILDKIT: "1"
-        run: docker build --pull --progress=plain --file Dockerfile --tag codex-runtime-builder:${{ github.sha }} .
 
       - name: Build ARM64 bootstrap from source
         working-directory: vendor/termux-packages
@@ -161,6 +156,17 @@ jobs:
           echo "--- Final build output ---"
           tail -n 160 "$BUILD_LOG" | cut -c1-1000 || true
           exit "$BUILD_STATUS"
+
+      # Save successful package markers and partial source/build state even when
+      # a later package fails. The next run restores the newest matching snapshot.
+      - name: Save incremental private ARM64 package cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.termux-build
+            vendor/termux-packages/output
+          key: termux-private-runtime-v3-${{ hashFiles('runtime/sources.lock.yml', 'runtime/private-runtime-config.json', 'scripts/prepare-private-runtime-source.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload ARM64 runtime build diagnostics
         if: always()
