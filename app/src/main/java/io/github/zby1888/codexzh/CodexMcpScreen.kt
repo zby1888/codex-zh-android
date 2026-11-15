@@ -91,9 +91,12 @@ internal fun CodexMcpScreen(
                 val args = argumentsText.lineSequence()
                     .map { it.trim() }
                     .filter { it.isNotEmpty() }
+                    .toList()
+                val argsArray = org.json.JSONArray()
+                args.forEach { argsArray.put(it) }
                 val config = org.json.JSONObject()
                     .put("command", cleanCommand)
-                    .put("args", org.json.JSONArray().also { array -> args.forEach(array::put) })
+                    .put("args", argsArray)
                 if (workingDirectory.isNotBlank()) config.put("cwd", workingDirectory.trim())
                 config
             } else {
