@@ -560,6 +560,11 @@ internal fun CodexChatScreen(
     var showWorkspacePicker by remember { mutableStateOf(false) }
     val workspaceOptions = remember { mutableStateListOf<String>() }
     var newWorkspaceName by remember { mutableStateOf("") }
+    var actionsMenuExpanded by remember { mutableStateOf(false) }
+    var goalDialogOpen by remember { mutableStateOf(false) }
+    var goalText by remember { mutableStateOf("") }
+    var goalBudget by remember { mutableStateOf("") }
+    var goalStatus by remember { mutableStateOf<String?>(null) }
     val handler = remember { Handler(Looper.getMainLooper()) }
     suspend fun ensureAgent(): CodexAgentController {
         state.controller?.takeIf { it.isConnected }?.let { return it }
@@ -666,6 +671,106 @@ internal fun CodexChatScreen(
                 loadThreads(ensureAgent())
             } catch (error: Exception) {
                 state.error = error.message?.take(600) ?: "读取会话列表失败"
+            } finally {
+                state.isSubmitting = false
+            }
+        }
+    }
+
+    fun compactCurrentThread() {
+        val threadId = state.threadId ?: return
+        if (state.isWorking || state.isSubmitting) return
+        scope.launch {
+            state.isSubmitting = true
+            state.error = null
+            try {
+                val agent = ensureAgent()
+                withContext(Dispatchers.IO) { agent.compactThread(threadId) }
+                state.status = "已请求压缩当前会话上下文"
+            } catch (error: Exception) {
+                state.error = error.message?.take(600) ?: "压缩会话失败"
+            } finally {
+                state.isSubmitting = false
+            }
+        }
+    }
+
+    fun openGoalEditor() {
+        val threadId = state.threadId ?: return
+        if (state.isSubmitting || state.isWorking) return
+        scope.launch {
+            state.isSubmitting = true
+            state.error = null
+            try {
+                val agent = ensureAgent()
+                val response = withContext(Dispatchers.IO) { agent.getGoal(threadId) }
+                val goal = response.optJSONObject("goal")
+                goalText = goal?.optString("objective").orEmpty()
+                goalBudget = goal?.opt("tokenBudget")
+                    ?.takeIf { it != JSONObject.NULL }
+                    ?.toString()
+                    .orEmpty()
+                goalStatus = goal?.optString("status")
+                goalDialogOpen = true
+            } catch (error: Exception) {
+                state.error = error.message?.take(600) ?: "读取会话目标失败"
+            } finally {
+                state.isSubmitting = false
+            }
+        }
+    }
+
+    fun saveGoal() {
+        val threadId = state.threadId ?: return
+        val objective = goalText.trim()
+        if (objective.isBlank() || objective.length > 4000) {
+            state.error = "目标内容不能为空，且不能超过 4000 个字符"
+            return
+        }
+        val budget = goalBudget.trim().takeIf { it.isNotEmpty() }?.toLongOrNull()
+        if (goalBudget.isNotBlank() && (budget == null || budget <= 0L)) {
+            state.error = "Token 预算必须是大于 0 的整数，或者留空表示不设预算"
+            return
+        }
+        scope.launch {
+            state.isSubmitting = true
+            state.error = null
+            try {
+                val agent = ensureAgent()
+                withContext(Dispatchers.IO) {
+                    agent.setGoal(
+                        threadId = threadId,
+                        objective = objective,
+                        tokenBudget = budget,
+                        status = "active"
+                    )
+                }
+                goalDialogOpen = false
+                goalStatus = "active"
+                state.status = "已保存本会话目标"
+            } catch (error: Exception) {
+                state.error = error.message?.take(600) ?: "保存会话目标失败"
+            } finally {
+                state.isSubmitting = false
+            }
+        }
+    }
+
+    fun clearGoal() {
+        val threadId = state.threadId ?: return
+        scope.launch {
+            state.isSubmitting = true
+            state.error = null
+            try {
+                val agent = ensureAgent()
+                withContext(Dispatchers.IO) { agent.clearGoal(threadId) }
+                goalDialogOpen = false
+                goalText = ""
+                goalBudget = ""
+                goalStatus = null
+                state.status = "已清除本会话目标"
+            } catch (error: Exception) {
+                state.error = error.message?.take(600) ?: "清除会话目标失败"
             } finally {
                 state.isSubmitting = false
             }
@@ -1031,6 +1136,51 @@ internal fun CodexChatScreen(
         )
     }
 
+    if (goalDialogOpen) {
+        AlertDialog(
+            onDismissRequest = { if (!state.isSubmitting) goalDialogOpen = false },
+            title = { Text("本会话目标") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = goalText,
+                        onValueChange = { goalText = it.take(4000) },
+                        label = { Text("希望 Codex 完成什么") },
+                        minLines = 3,
+                        maxLines = 6,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = goalBudget,
+                        onValueChange = { goalBudget = it.filter(Char::isDigit).take(12) },
+                        label = { Text("Token 预算（可留空）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    goalStatus?.let {
+                        Text("当前目标状态：$it", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { saveGoal() },
+                    enabled = !state.isSubmitting && goalText.isNotBlank()
+                ) { Text("保存目标") }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { clearGoal() }, enabled = !state.isSubmitting) {
+                        Text("清除目标")
+                    }
+                    TextButton(onClick = { goalDialogOpen = false }, enabled = !state.isSubmitting) {
+                        Text("关闭")
+                    }
+                }
+            }
+        )
+    }
+
     Column(
         modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -1061,7 +1211,32 @@ internal fun CodexChatScreen(
                 Text("项目：$name")
             }
             state.workingDirectory?.let { path ->
-                Text(path, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                Text(path, style = MaterialTheme.typography.labelSmall, maxLines = 1, modifier = Modifier.weight(1f))
+            }
+            Box {
+                TextButton(onClick = { actionsMenuExpanded = true }, enabled = state.threadId != null && !state.isSubmitting) {
+                    Text("会话操作")
+                }
+                DropdownMenu(
+                    expanded = actionsMenuExpanded,
+                    onDismissRequest = { actionsMenuExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("设置会话目标") },
+                        onClick = {
+                            actionsMenuExpanded = false
+                            openGoalEditor()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("压缩上下文") },
+                        onClick = {
+                            actionsMenuExpanded = false
+                            compactCurrentThread()
+                        },
+                        enabled = !state.isWorking
+                    )
+                }
             }
         }
         if (showWorkspacePicker) {
