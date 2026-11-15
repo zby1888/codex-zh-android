@@ -57,9 +57,7 @@ private fun CodexZhApp() {
             when (tab) {
                 Tab.Chat -> ChatScreen(Modifier.padding(padding))
                 Tab.Terminal -> TerminalScreen(Modifier.padding(padding))
-                Tab.Providers -> ListScreen(Modifier.padding(padding), "模型服务商",
-                    "配置第三方中转站 API、模型 ID、API 基础地址和自定义请求头。",
-                    listOf("OpenAI Responses 兼容", "OpenAI Chat Completions 兼容", "Anthropic Messages", "Google Gemini", "自定义 API"))
+                Tab.Providers -> ProviderScreen(Modifier.padding(padding))
                 Tab.Mcp -> ListScreen(Modifier.padding(padding), "MCP 工具",
                     "目标支持远程 Streamable HTTP 与本地 STDIO MCP 服务。",
                     listOf("服务列表与连接测试", "工具发现和调用进度", "允许 / 拒绝 / 每次询问", "导入 Codex、OpenCode、Operit 配置"))

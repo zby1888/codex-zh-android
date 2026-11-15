@@ -1,5 +1,21 @@
 # 总体架构
 
+## 不可偏离的项目定位
+
+本项目的首要目标是把 Codex CLI 的主要能力尽可能完整地整合进 Android 原生操作界面，而不是制作一个只会发送文字的聊天壳。Codex CLI 是 Agent 执行核心；Android App 是图形化客户端和运行时宿主。
+
+- 主线优先使用固定版本的官方 Codex CLI / Termux Android 构建配方。汉化 CLI 只允许作为可选变体，不得成为 APK 构建前置条件。
+- 中文界面由 Android 项目独立维护，不依赖 CLI TUI 是否汉化。
+- 先盘点指定 CLI 版本的真实能力，再按稳定程度实现图形化入口；没有公开或稳定接口的功能必须标记限制，并保留合适的终端回退。
+- Agent 协议通道与交互式 PTY 终端必须分离；共享工作目录不等于共享 stdin/stdout。
+- 所有后续自动化 Agent / Codex CLI 任务都必须遵守本文件和 README 的项目定位，禁止擅自把 APK 改回依赖汉化补丁仓库。
+
+功能覆盖清单和逐项验收标准见 [CLI 功能对照表](CLI-FEATURE-PARITY.md)。
+
+## App Server 接入风险
+
+Codex App Server 的 JSON-RPC/stdio 是优先评估的 Agent 图形界面接入方式，但协议和具体方法必须以当前锁定的 Codex 版本为准。官方文档当前对 App Server 的生产适用性有实验性限制说明，因此必须先在 ARM64 Android 私有运行时做版本级协议测试，并把通信层隔离成可替换模块；不得仅凭文档示例就宣称已达到生产稳定性。若某项能力在锁定版本中不可用或不稳定，应保留 CLI/PTY 回退，并在界面明确标记。
+
 分层：Compose UI → 应用协调层 → 协议层 → 私有 Runtime/PTY → 存储与密钥。
 
 关键模块：
