@@ -157,7 +157,7 @@ internal class CodexChatUiState {
             ?: models.firstOrNull { it.isDefault }
             ?: models.firstOrNull()
         selectedModelId = selected?.id
-        if (selected != null && selectedReasoningEffort !in selected.reasoningEfforts) {
+        if (selected != null && selectedReasoningEffort?.let { it in selected.reasoningEfforts } != true) {
             selectedReasoningEffort = selected.defaultReasoningEffort.ifBlank {
                 selected.reasoningEfforts.firstOrNull()
             }
