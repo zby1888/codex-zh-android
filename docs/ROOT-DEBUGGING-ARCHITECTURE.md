@@ -40,7 +40,7 @@ Root 管理器对授权的最终决定权高于 App 内的开关。用户可以�
 5. 拒绝或撤销后，正在等待的请求应取消；Root 子进程和进程组应可停止；权限失败要以结构化结果返回，不能静默降级成普通身份继续执行。
 6. 记录必要的审计信息：何时、哪个会话、哪个工具、对什么目标执行、退出码和结果摘要。敏感内容与密钥必须脱敏；不要把 Root 输出写入普通日志后无条件上传。
 
-此设计借鉴 OpenCode 的 action/resource 权限规则、默认 ask、待审批请求生命周期和项目级授权，以及 Operit 的 Root / Shizuku / 普通 Shell 分层和“自动允许、每次询问、禁止”权限体验；不复制它们的运行时或源码。Codex 的工具调用协议仍按本项目锁定的 App Server schema 接入。
+此设计借鉴 OpenCode 的 action/resource 规则、通配匹配与最后匹配胜出、拒绝优先、待审批请求生命周期，以及 once / always / reject 审批结果；也参考其项目级保存授权和 hard-deny policy。OpenCode 自带的基础权限配置包含较宽泛的 allow 规则，因此我们不照搬其默认权限，而是为 Root 操作采用更严格的默认 ask，初期只允许逐次确认。另借鉴 Operit 的 Root / Shizuku / 普通 Shell 分层和“自动允许、每次询问、禁止”权限交互；不复制它们的运行时或源码。Codex 的工具调用协议仍按本项目锁定的 App Server schema 接入。
 
 ## 逆向与动态调试工具路线
 
