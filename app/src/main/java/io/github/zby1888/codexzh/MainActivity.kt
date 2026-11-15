@@ -59,28 +59,38 @@ private fun CodexZhApp() {
     MaterialTheme {
         Scaffold(
             topBar = {
-                TopAppBar(title = {
-                    Column {
-                        Text("Codex 中文版", fontWeight = FontWeight.SemiBold)
-                        Text("Android ARM64 · 私有运行时", style = MaterialTheme.typography.labelSmall)
-                    }
-                })
+                if (tab != Tab.Chat) {
+                    TopAppBar(title = {
+                        Column {
+                            Text("Codex 中文版", fontWeight = FontWeight.SemiBold)
+                            Text("Android ARM64 · 私有运行时", style = MaterialTheme.typography.labelSmall)
+                        }
+                    })
+                }
             },
             bottomBar = {
-                NavigationBar {
-                    Tab.entries.forEach { item ->
-                        NavigationBarItem(
-                            selected = tab == item,
-                            onClick = { tab = item },
-                            icon = { Text(item.glyph) },
-                            label = { Text(item.label) }
-                        )
+                if (tab != Tab.Chat) {
+                    NavigationBar {
+                        Tab.entries.filter { it != Tab.Chat }.forEach { item ->
+                            NavigationBarItem(
+                                selected = tab == item,
+                                onClick = { tab = item },
+                                icon = { Text(item.glyph) },
+                                label = { Text(item.label) }
+                            )
+                        }
                     }
                 }
             }
         ) { padding ->
             when (tab) {
-                Tab.Chat -> CodexChatScreen(Modifier.padding(padding), chatState) { tab = Tab.Providers }
+                Tab.Chat -> CodexChatScreen(
+                    modifier = Modifier.padding(padding),
+                    state = chatState,
+                    onOpenProviders = { tab = Tab.Providers },
+                    onOpenMcp = { tab = Tab.Mcp },
+                    onOpenTerminal = { tab = Tab.Terminal }
+                )
                 Tab.Terminal -> TerminalScreen(
                     Modifier.padding(padding), chatState, runtimeManager, runtimeInstaller, terminalSession
                 )

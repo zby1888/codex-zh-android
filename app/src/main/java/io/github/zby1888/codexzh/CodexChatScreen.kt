@@ -11,7 +11,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
@@ -24,7 +27,13 @@ import androidx.compose.material3.Divider
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -540,7 +549,9 @@ internal class CodexChatUiState {
 internal fun CodexChatScreen(
     modifier: Modifier = Modifier,
     state: CodexChatUiState,
-    onOpenProviders: () -> Unit
+    onOpenProviders: () -> Unit,
+    onOpenMcp: () -> Unit,
+    onOpenTerminal: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -565,6 +576,8 @@ internal fun CodexChatScreen(
     var goalText by remember { mutableStateOf("") }
     var goalBudget by remember { mutableStateOf("") }
     var goalStatus by remember { mutableStateOf<String?>(null) }
+    var toolsMenuExpanded by remember { mutableStateOf(false) }
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val handler = remember { Handler(Looper.getMainLooper()) }
     suspend fun ensureAgent(): CodexAgentController {
         state.controller?.takeIf { it.isConnected }?.let { return it }
@@ -1205,72 +1218,333 @@ internal fun CodexChatScreen(
         )
     }
 
-    Column(
-        modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Card {
-            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Codex 智能体", fontWeight = FontWeight.SemiBold)
-                    Text(if (state.controller?.let { it.isConnected } == true) "已连接" else "未连接")
-                }
-                Text(state.status, style = MaterialTheme.typography.bodySmall)
-                state.threadId?.let {
-                    Text("会话：${it.take(8)}…", style = MaterialTheme.typography.labelSmall)
-                }
-                if (providerRepository.getDefaultCodexAgent() == null) {
-                    Text("还没有设置 Codex Agent 服务商。", style = MaterialTheme.typography.bodySmall)
-                    OutlinedButton(onClick = onOpenProviders) { Text("去设置服务商") }
-                }
-            }
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(
-                onClick = { openWorkspacePicker() },
-                enabled = !state.isSubmitting && !state.isWorking
-            ) {
-                val name = state.workingDirectory?.substringAfterLast('/') ?: "选择项目"
-                Text("项目：$name")
-            }
-            state.workingDirectory?.let { path ->
-                Text(path, style = MaterialTheme.typography.labelSmall, maxLines = 1, modifier = Modifier.weight(1f))
-            }
-            Box {
-                TextButton(onClick = { actionsMenuExpanded = true }, enabled = state.threadId != null && !state.isSubmitting) {
-                    Text("会话操作")
-                }
-                DropdownMenu(
-                    expanded = actionsMenuExpanded,
-                    onDismissRequest = { actionsMenuExpanded = false }
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet {
+                Column(
+                    Modifier.fillMaxSize().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    DropdownMenuItem(
-                        text = { Text("设置会话目标") },
+                    Text("Codex", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                    Button(
                         onClick = {
-                            actionsMenuExpanded = false
-                            openGoalEditor()
+                            startNewConversation()
+                            scope.launch { drawerState.close() }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !state.isSubmitting
+                    ) { Text("＋ 新建聊天") }
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch { drawerState.close() }
+                            openWorkspacePicker()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !state.isSubmitting && !state.isWorking
+                    ) {
+                        Text("项目：\${state.workingDirectory?.substringAfterLast('/') ?: "选择项目"}")
+                    }
+                    Divider()
+                    Text("会话记录", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        TextButton(
+                            onClick = {
+                                state.showArchivedThreads = false
+                                refreshThreads()
+                            },
+                            enabled = !state.isSubmitting && state.showArchivedThreads
+                        ) { Text("最近") }
+                        TextButton(
+                            onClick = {
+                                state.showArchivedThreads = true
+                                refreshThreads()
+                            },
+                            enabled = !state.isSubmitting && !state.showArchivedThreads
+                        ) { Text("已归档") }
+                        Spacer(Modifier.weight(1f))
+                        TextButton(onClick = { refreshThreads() }, enabled = !state.isSubmitting) {
+                            Text("刷新")
                         }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("压缩上下文") },
+                    }
+                    if (state.recentThreads.isEmpty()) {
+                        Text(
+                            if (state.isSubmitting) "正在读取会话…" else "这里还没有会话记录",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            items(state.recentThreads, key = { it.id }) { summary ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                                ) {
+                                    TextButton(
+                                        onClick = {
+                                            resumeThread(summary)
+                                            scope.launch { drawerState.close() }
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                        enabled = !state.isSubmitting
+                                    ) {
+                                        Column(Modifier.fillMaxWidth()) {
+                                            Text(
+                                                summary.title,
+                                                maxLines = 1,
+                                                fontWeight = if (summary.id == state.threadId) FontWeight.SemiBold else FontWeight.Normal
+                                            )
+                                            if (summary.preview.isNotBlank() && summary.preview != summary.title) {
+                                                Text(
+                                                    summary.preview,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    maxLines = 1,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Box {
+                                        TextButton(
+                                            onClick = { actionMenuThreadId = summary.id },
+                                            enabled = !state.isSubmitting
+                                        ) { Text("⋯") }
+                                        DropdownMenu(
+                                            expanded = actionMenuThreadId == summary.id,
+                                            onDismissRequest = { actionMenuThreadId = null }
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = { Text("从这里分支") },
+                                                onClick = {
+                                                    actionMenuThreadId = null
+                                                    forkThread(summary)
+                                                    scope.launch { drawerState.close() }
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("重命名") },
+                                                onClick = {
+                                                    actionMenuThreadId = null
+                                                    renameTarget = summary
+                                                    renameValue = summary.title
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text(if (state.showArchivedThreads) "取消归档" else "归档") },
+                                                onClick = {
+                                                    actionMenuThreadId = null
+                                                    if (state.showArchivedThreads) unarchiveThread(summary)
+                                                    else archiveTarget = summary
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("删除会话") },
+                                                onClick = {
+                                                    actionMenuThreadId = null
+                                                    deleteTarget = summary
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Divider()
+                    Text("工作工具", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    TextButton(
                         onClick = {
-                            actionsMenuExpanded = false
-                            compactCurrentThread()
+                            scope.launch { drawerState.close() }
+                            onOpenTerminal()
                         },
-                        enabled = !state.isWorking
-                    )
-                    DropdownMenuItem(
-                        text = { Text("审查未提交改动") },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("终端") }
+                    TextButton(
                         onClick = {
-                            actionsMenuExpanded = false
-                            reviewUncommittedChanges()
+                            scope.launch { drawerState.close() }
+                            onOpenMcp()
                         },
-                        enabled = !state.isWorking
-                    )
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("MCP 工具") }
+                    TextButton(
+                        onClick = {
+                            scope.launch { drawerState.close() }
+                            onOpenProviders()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("服务商与模型设置") }
+                    if (providerRepository.getDefaultCodexAgent() == null) {
+                        Text(
+                            "还没有配置 Codex Agent 服务商，需要兼容 Responses API 的中转站。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
+    ) {
+        Column(
+            modifier.fillMaxSize().imePadding().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = {
+                        scope.launch {
+                            drawerState.open()
+                            if (state.recentThreads.isEmpty()) refreshThreads()
+                        }
+                    }
+                ) { Text("☰", style = MaterialTheme.typography.titleLarge) }
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        state.recentThreads.firstOrNull { it.id == state.threadId }?.title ?: "Codex",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1
+                    )
+                    Text(
+                        state.workingDirectory?.substringAfterLast('/') ?: "选择项目工作区",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1
+                    )
+                }
+                TextButton(
+                    onClick = { startNewConversation() },
+                    enabled = !state.isSubmitting
+                ) { Text("新建") }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+            ) {
+                Box {
+                    TextButton(
+                        onClick = {
+                            if (state.models.isEmpty()) refreshModels()
+                            else modelMenuExpanded = true
+                        },
+                        enabled = !state.isSubmitting
+                    ) {
+                        Text(
+                            state.models.firstOrNull { it.id == state.selectedModelId }?.displayName
+                                ?: "选择模型"
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = modelMenuExpanded,
+                        onDismissRequest = { modelMenuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("刷新模型列表") },
+                            onClick = {
+                                modelMenuExpanded = false
+                                refreshModels()
+                            }
+                        )
+                        state.models.forEach { model ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(model.displayName)
+                                        if (model.description.isNotBlank()) {
+                                            Text(
+                                                model.description,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                maxLines = 2
+                                            )
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    state.selectModel(model)
+                                    modelMenuExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+                Box {
+                    TextButton(
+                        onClick = { effortMenuExpanded = true },
+                        enabled = state.models.firstOrNull { it.id == state.selectedModelId }
+                            ?.reasoningEfforts?.isNotEmpty() == true
+                    ) {
+                        Text(state.selectedReasoningEffort ?: "默认推理")
+                    }
+                    DropdownMenu(
+                        expanded = effortMenuExpanded,
+                        onDismissRequest = { effortMenuExpanded = false }
+                    ) {
+                        state.models.firstOrNull { it.id == state.selectedModelId }
+                            ?.reasoningEfforts?.forEach { effort ->
+                                DropdownMenuItem(
+                                    text = { Text(effort) },
+                                    onClick = {
+                                        state.selectedReasoningEffort = effort
+                                        effortMenuExpanded = false
+                                    }
+                                )
+                            }
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                Box {
+                    TextButton(
+                        onClick = { actionsMenuExpanded = true },
+                        enabled = state.threadId != null && !state.isSubmitting
+                    ) { Text("更多") }
+                    DropdownMenu(
+                        expanded = actionsMenuExpanded,
+                        onDismissRequest = { actionsMenuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("设置会话目标") },
+                            onClick = {
+                                actionsMenuExpanded = false
+                                openGoalEditor()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("压缩上下文") },
+                            onClick = {
+                                actionsMenuExpanded = false
+                                compactCurrentThread()
+                            },
+                            enabled = !state.isWorking
+                        )
+                        DropdownMenuItem(
+                            text = { Text("审查未提交改动") },
+                            onClick = {
+                                actionsMenuExpanded = false
+                                reviewUncommittedChanges()
+                            },
+                            enabled = !state.isWorking
+                        )
+                    }
+                }
+            }
+            Text(
+                when {
+                    state.pendingApproval != null || state.pendingUserInput != null -> "等待你处理一项请求"
+                    state.isWorking -> "Codex 正在执行任务"
+                    state.controller?.isConnected == true -> "Codex 已连接"
+                    else -> state.status
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = if (state.error != null) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
         if (showWorkspacePicker) {
             AlertDialog(
                 onDismissRequest = { if (!state.isSubmitting) showWorkspacePicker = false },
@@ -1326,83 +1600,6 @@ internal fun CodexChatScreen(
                     ) { Text("关闭") }
                 }
             )
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Column(Modifier.weight(1f)) {
-                Box {
-                    OutlinedButton(
-                        onClick = {
-                            if (state.models.isEmpty()) refreshModels()
-                            else modelMenuExpanded = true
-                        },
-                        enabled = !state.isSubmitting
-                    ) {
-                        Text(
-                            state.models.firstOrNull { it.id == state.selectedModelId }?.displayName
-                                ?: "读取模型列表"
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = modelMenuExpanded,
-                        onDismissRequest = { modelMenuExpanded = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("刷新模型列表") },
-                            onClick = {
-                                modelMenuExpanded = false
-                                refreshModels()
-                            }
-                        )
-                        state.models.forEach { model ->
-                            DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Text(model.displayName)
-                                        if (model.description.isNotBlank()) {
-                                            Text(
-                                                model.description,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                maxLines = 2
-                                            )
-                                        }
-                                    }
-                                },
-                                onClick = {
-                                    state.selectModel(model)
-                                    modelMenuExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-            Column {
-                Box {
-                    OutlinedButton(
-                        onClick = { effortMenuExpanded = true },
-                        enabled = state.models.firstOrNull { it.id == state.selectedModelId }
-                            ?.reasoningEfforts?.isNotEmpty() == true
-                    ) {
-                        Text(state.selectedReasoningEffort ?: "默认推理")
-                    }
-                    DropdownMenu(
-                        expanded = effortMenuExpanded,
-                        onDismissRequest = { effortMenuExpanded = false }
-                    ) {
-                        state.models.firstOrNull { it.id == state.selectedModelId }
-                            ?.reasoningEfforts?.forEach { effort ->
-                                DropdownMenuItem(
-                                    text = { Text(effort) },
-                                    onClick = {
-                                        state.selectedReasoningEffort = effort
-                                        effortMenuExpanded = false
-                                    }
-                                )
-                            }
-                    }
-                }
-            }
         }
 
         state.error?.let { error ->
@@ -1541,181 +1738,204 @@ internal fun CodexChatScreen(
                 }
             }
             items(state.entries, key = { it.id }) { entry ->
-                Card {
-                    Column(Modifier.fillMaxWidth().padding(12.dp)) {
-                        Text(entry.title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(4.dp))
-                        Text(entry.text, style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            }
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = { refreshThreads() }, enabled = !state.isSubmitting) {
-                Text("历史会话")
-            }
-            TextButton(onClick = { startNewConversation() }, enabled = !state.isSubmitting) {
-                Text("新建会话")
-            }
-            state.workingDirectory?.let {
-                Text(it.substringAfterLast('/'), style = MaterialTheme.typography.labelSmall)
-            }
-        }
-        if (state.showRecentThreads) {
-            Card {
-                Column(
-                    Modifier.fillMaxWidth().padding(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            if (state.showArchivedThreads) "已归档会话" else "最近会话",
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(
-                            onClick = {
-                                state.showArchivedThreads = false
-                                refreshThreads()
-                            },
-                            enabled = !state.isSubmitting && state.showArchivedThreads
-                        ) { Text("最近") }
-                        TextButton(
-                            onClick = {
-                                state.showArchivedThreads = true
-                                refreshThreads()
-                            },
-                            enabled = !state.isSubmitting && !state.showArchivedThreads
-                        ) { Text("已归档") }
-                    }
-                    if (state.recentThreads.isEmpty()) {
-                        Text("还没有可恢复的会话", style = MaterialTheme.typography.bodySmall)
-                    } else {
-                        LazyColumn(Modifier.height(180.dp)) {
-                            items(state.recentThreads, key = { it.id }) { summary ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    TextButton(
-                                        onClick = { resumeThread(summary) },
-                                        modifier = Modifier.weight(1f),
-                                        enabled = !state.isSubmitting
-                                    ) {
-                                        Column(Modifier.fillMaxWidth()) {
-                                            Text(summary.title, maxLines = 1)
-                                            if (summary.workingDirectory.isNotBlank()) {
-                                                Text(
-                                                    summary.workingDirectory,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    maxLines = 1
-                                                )
-                                            }
-                                            if (summary.preview.isNotBlank() && summary.preview != summary.title) {
-                                                Text(
-                                                    summary.preview,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    maxLines = 1
-                                                )
-                                            }
-                                        }
-                                    }
-                                    Box {
-                                        TextButton(
-                                            onClick = { actionMenuThreadId = summary.id },
-                                            enabled = !state.isSubmitting
-                                        ) { Text("更多") }
-                                        DropdownMenu(
-                                            expanded = actionMenuThreadId == summary.id,
-                                            onDismissRequest = { actionMenuThreadId = null }
-                                        ) {
-                                            DropdownMenuItem(
-                                                text = { Text("从这里分支") },
-                                                onClick = {
-                                                    actionMenuThreadId = null
-                                                    forkThread(summary)
-                                                }
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text("重命名") },
-                                                onClick = {
-                                                    actionMenuThreadId = null
-                                                    renameTarget = summary
-                                                    renameValue = summary.title
-                                                }
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text(if (state.showArchivedThreads) "取消归档" else "归档") },
-                                                onClick = {
-                                                    actionMenuThreadId = null
-                                                    if (state.showArchivedThreads) unarchiveThread(summary)
-                                                    else archiveTarget = summary
-                                                }
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text("删除会话") },
-                                                onClick = {
-                                                    actionMenuThreadId = null
-                                                    deleteTarget = summary
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
+                when {
+                    entry.isUser -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            Surface(
+                                modifier = Modifier.widthIn(max = 340.dp),
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                shape = RoundedCornerShape(20.dp)
+                            ) {
+                                Text(
+                                    entry.text,
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
                             }
                         }
                     }
-                    TextButton(onClick = { state.showRecentThreads = false }) { Text("收起") }
+                    entry.isActivity -> {
+                        var expanded by remember(entry.id) { mutableStateOf(false) }
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Column(Modifier.padding(10.dp)) {
+                                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                    Text(
+                                        entry.title,
+                                        modifier = Modifier.weight(1f),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    TextButton(onClick = { expanded = !expanded }) {
+                                        Text(if (expanded) "收起" else "详情")
+                                    }
+                                }
+                                Text(
+                                    if (expanded || entry.text.length <= 220) entry.text else entry.text.take(220) + "…",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+                    else -> {
+                        Column(
+                            Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                entry.title.ifBlank { "Codex" },
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(entry.text, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
                 }
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                value = prompt,
-                onValueChange = { prompt = it },
-                modifier = Modifier.weight(1f),
-                minLines = 1,
-                maxLines = 4,
-                enabled = !state.isSubmitting && state.pendingApproval == null && state.pendingUserInput == null,
-                placeholder = { Text("给 Codex 安排任务…") },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = {
-                    val text = prompt.trim()
-                    prompt = ""
-                    connectAndSend(text)
-                })
-            )
-            Button(
-                onClick = {
-                    val text = prompt.trim()
-                    prompt = ""
-                    connectAndSend(text)
-                },
-                enabled = prompt.isNotBlank() && !state.isSubmitting && state.pendingApproval == null && state.pendingUserInput == null
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 2.dp
+        ) {
+            Column(
+                Modifier.fillMaxWidth().padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                if (state.isSubmitting) CircularProgressIndicator()
-                else Text(if (state.isWorking) "追加" else "发送")
+                OutlinedTextField(
+                    value = prompt,
+                    onValueChange = { prompt = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 1,
+                    maxLines = 5,
+                    enabled = !state.isSubmitting && state.pendingApproval == null && state.pendingUserInput == null,
+                    placeholder = { Text("给 Codex 安排任务…") },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = {
+                        val text = prompt.trim()
+                        if (text.isNotEmpty()) {
+                            prompt = ""
+                            connectAndSend(text)
+                        }
+                    })
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Box {
+                        TextButton(onClick = { toolsMenuExpanded = true }) {
+                            Text("＋ 工具")
+                        }
+                        DropdownMenu(
+                            expanded = toolsMenuExpanded,
+                            onDismissRequest = { toolsMenuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("选择项目工作区") },
+                                onClick = {
+                                    toolsMenuExpanded = false
+                                    openWorkspacePicker()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("设置本会话目标") },
+                                onClick = {
+                                    toolsMenuExpanded = false
+                                    openGoalEditor()
+                                },
+                                enabled = state.threadId != null && !state.isWorking
+                            )
+                            DropdownMenuItem(
+                                text = { Text("审查未提交改动") },
+                                onClick = {
+                                    toolsMenuExpanded = false
+                                    reviewUncommittedChanges()
+                                },
+                                enabled = state.threadId != null && !state.isWorking
+                            )
+                            DropdownMenuItem(
+                                text = { Text("压缩上下文") },
+                                onClick = {
+                                    toolsMenuExpanded = false
+                                    compactCurrentThread()
+                                },
+                                enabled = state.threadId != null && !state.isWorking
+                            )
+                            DropdownMenuItem(
+                                text = { Text("MCP 工具管理") },
+                                onClick = {
+                                    toolsMenuExpanded = false
+                                    onOpenMcp()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("服务商设置") },
+                                onClick = {
+                                    toolsMenuExpanded = false
+                                    onOpenProviders()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("打开终端") },
+                                onClick = {
+                                    toolsMenuExpanded = false
+                                    onOpenTerminal()
+                                }
+                            )
+                        }
+                    }
+                    Text(
+                        state.workingDirectory?.substringAfterLast('/') ?: "未选择项目",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (state.isWorking && !state.activeTurnId.isNullOrBlank()) {
+                        TextButton(
+                            onClick = {
+                                val agent = state.controller ?: return@TextButton
+                                val thread = state.threadId ?: return@TextButton
+                                val turn = state.activeTurnId ?: return@TextButton
+                                scope.launch {
+                                    runCatching {
+                                        withContext(Dispatchers.IO) { agent.interruptTurn(thread, turn) }
+                                    }.onFailure { state.error = it.message ?: "停止任务失败" }
+                                }
+                            }
+                        ) { Text("停止") }
+                    }
+                    Button(
+                        onClick = {
+                            val text = prompt.trim()
+                            prompt = ""
+                            connectAndSend(text)
+                        },
+                        enabled = prompt.isNotBlank() && !state.isSubmitting &&
+                            state.pendingApproval == null && state.pendingUserInput == null
+                    ) {
+                        if (state.isSubmitting) CircularProgressIndicator()
+                        else Text(if (state.isWorking) "追加" else "发送")
+                    }
+                }
             }
         }
-        if (state.isWorking && !state.activeTurnId.isNullOrBlank()) {
-            TextButton(onClick = {
-                val agent = state.controller ?: return@TextButton
-                val thread = state.threadId ?: return@TextButton
-                val turn = state.activeTurnId ?: return@TextButton
-                scope.launch {
-                    runCatching {
-                        withContext(Dispatchers.IO) { agent.interruptTurn(thread, turn) }
-                    }.onFailure { state.error = it.message ?: "停止任务失败" }
-                }
-            }) { Text("停止当前任务") }
-        }
+    }
     }
 }
 
+private fun defaultWorkspace
 private fun defaultWorkspace(home: File): String =
     CodexWorkspaceRepository(home).defaultWorkspace().canonicalPath
