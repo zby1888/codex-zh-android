@@ -30,7 +30,8 @@ internal data class ProviderConfig(
     val baseUrl: String,
     val protocol: ProviderProtocol,
     val modelId: String,
-    val isDefault: Boolean = false
+    val isDefault: Boolean = false,
+    val isCodexAgentDefault: Boolean = false
 )
 
 internal data class ProviderCredentials(
@@ -66,7 +67,8 @@ internal class ProviderRepository(context: Context) {
                 baseUrl = item.optString("baseUrl"),
                 protocol = protocol,
                 modelId = item.optString("modelId"),
-                isDefault = preferences.getString(DEFAULT_PROVIDER_KEY, null) == id
+                isDefault = preferences.getString(DEFAULT_PROVIDER_KEY, null) == id,
+                isCodexAgentDefault = preferences.getString(DEFAULT_CODEX_PROVIDER_KEY, null) == id
             )
         }
         return result.sortedWith(compareByDescending<ProviderConfig> { it.isDefault }.thenBy { it.displayName })
@@ -90,6 +92,11 @@ internal class ProviderRepository(context: Context) {
         val wasDefault = preferences.getString(DEFAULT_PROVIDER_KEY, null) == config.id
         val firstProvider = root.length() == 0
         val shouldBeDefault = config.isDefault || wasDefault || firstProvider
+        val wasCodexDefault = preferences.getString(DEFAULT_CODEX_PROVIDER_KEY, null) == config.id
+        val firstCodexProvider = config.protocol == ProviderProtocol.CODEX_RESPONSES &&
+            preferences.getString(DEFAULT_CODEX_PROVIDER_KEY, null).isNullOrBlank()
+        val shouldBeCodexDefault = config.protocol == ProviderProtocol.CODEX_RESPONSES &&
+            (config.isCodexAgentDefault || wasCodexDefault || firstCodexProvider)
 
         // Store secrets first. If metadata persistence fails, the encrypted
         // orphan can be removed later; plaintext is never written to preferences.
@@ -103,14 +110,16 @@ internal class ProviderRepository(context: Context) {
         if (!preferences.edit().putString(PROVIDERS_KEY, root.toString()).commit()) {
             throw IllegalStateException("无法保存服务商配置")
         }
-        if (shouldBeDefault) {
-            preferences.edit().putString(DEFAULT_PROVIDER_KEY, config.id).apply()
-        }
+        val editor = preferences.edit()
+        if (shouldBeDefault) editor.putString(DEFAULT_PROVIDER_KEY, config.id)
+        if (shouldBeCodexDefault) editor.putString(DEFAULT_CODEX_PROVIDER_KEY, config.id)
+        editor.apply()
         return config.copy(
             displayName = config.displayName.trim(),
             baseUrl = normalizeBaseUrl(config.baseUrl),
             modelId = config.modelId.trim(),
-            isDefault = shouldBeDefault
+            isDefault = shouldBeDefault,
+            isCodexAgentDefault = shouldBeCodexDefault
         )
     }
 
@@ -147,6 +156,18 @@ internal class ProviderRepository(context: Context) {
     fun getDefault(): ProviderConfig? = list().firstOrNull { it.isDefault }
 
     @Synchronized
+    fun setDefaultCodexAgent(providerId: String) {
+        val provider = get(providerId) ?: throw IllegalArgumentException("找不到服务商配置")
+        require(provider.protocol == ProviderProtocol.CODEX_RESPONSES) {
+            "Codex Agent 默认服务商必须兼容 Responses API"
+        }
+        preferences.edit().putString(DEFAULT_CODEX_PROVIDER_KEY, providerId).apply()
+    }
+
+    @Synchronized
+    fun getDefaultCodexAgent(): ProviderConfig? = list().firstOrNull { it.isCodexAgentDefault }
+
+    @Synchronized
     fun credentials(providerId: String): ProviderCredentials? {
         if (!readRoot().has(providerId)) return null
         val payload = secretStore.get(secretAlias(providerId)) ?: return null
@@ -162,10 +183,15 @@ internal class ProviderRepository(context: Context) {
             throw IllegalStateException("无法更新服务商列表")
         }
         secretStore.delete(secretAlias(providerId))
+        val editor = preferences.edit()
         if (preferences.getString(DEFAULT_PROVIDER_KEY, null) == providerId) {
-            val replacement = root.keys().asSequence().firstOrNull()
-            preferences.edit().putString(DEFAULT_PROVIDER_KEY, replacement).apply()
+            editor.putString(DEFAULT_PROVIDER_KEY, root.keys().asSequence().firstOrNull())
         }
+        if (preferences.getString(DEFAULT_CODEX_PROVIDER_KEY, null) == providerId) {
+            val replacement = list().firstOrNull { it.protocol == ProviderProtocol.CODEX_RESPONSES }?.id
+            editor.putString(DEFAULT_CODEX_PROVIDER_KEY, replacement)
+        }
+        editor.apply()
     }
 
     private fun readRoot(): JSONObject = runCatching {
@@ -215,6 +241,7 @@ internal class ProviderRepository(context: Context) {
         private const val CONFIG_PREFS = "codex_provider_config_v1"
         private const val PROVIDERS_KEY = "providers"
         private const val DEFAULT_PROVIDER_KEY = "default_provider"
+        private const val DEFAULT_CODEX_PROVIDER_KEY = "default_codex_agent_provider"
     }
 }
 
