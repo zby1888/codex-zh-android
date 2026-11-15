@@ -107,9 +107,48 @@ jobs:
           # prefix is mounted separately to keep large installed binaries/libraries
           # out of Docker's limited writable overlay and persist them in Actions cache.
           export TERMUX_DOCKER_RUN_EXTRA_ARGS="--volume $HOME/.termux-build:/home/builder/.termux-build --volume $HOME/.termux-build/prefix:/data/data/com.codex.zhou/files/runtime/prefix"
-          # The 7.7 GiB hosted runner killed rustc while compiling codex-tui.
           # Build one package at a time and disable Thin LTO to lower peak RAM.
-          ./scripts/run-docker.sh bash -c 'cd /home/builder/termux-packages && export TERMUX_PKG_MAKE_PROCESSES=1 CARGO_PROFILE_RELEASE_LTO=false && echo "===== Container disk before build =====" && df -h / /data /data/data/com.codex.zhou/files/runtime/prefix && ./scripts/build-bootstraps.sh --android10 --architectures aarch64'
+          # Keep the full compiler output in a separate artifact; only emit periodic
+          # resource snapshots to the Actions console so the job log stays readable.
+          BUILD_LOG="$RUNNER_TEMP/private-runtime-build.log"
+          : > "$BUILD_LOG"
+          ./scripts/run-docker.sh bash -c 'cd /home/builder/termux-packages && export TERMUX_PKG_MAKE_PROCESSES=1 CARGO_PROFILE_RELEASE_LTO=false && echo "===== Container disk before build =====" && df -h / /data /data/data/com.codex.zhou/files/runtime/prefix && free -h && ./scripts/build-bootstraps.sh --android10 --architectures aarch64' >"$BUILD_LOG" 2>&1 &
+          BUILD_PID=$!
+          while kill -0 "$BUILD_PID" 2>/dev/null; do
+            echo "===== Runtime build heartbeat: $(date -u +'%Y-%m-%dT%H:%M:%SZ') ====="
+            echo "--- Host disk ---"
+            df -h "$HOME" || true
+            echo "--- Host memory ---"
+            free -h || true
+            echo "--- Cached build/prefix size ---"
+            du -sh "$HOME/.termux-build" "$HOME/.termux-build/prefix" 2>/dev/null || true
+            if docker inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
+              docker inspect "$CONTAINER_NAME" --format 'container={{.State.Status}} oom_killed={{.State.OOMKilled}} exit={{.State.ExitCode}}' || true
+              docker stats --no-stream "$CONTAINER_NAME" || true
+              docker exec "$CONTAINER_NAME" df -h / /data/data/com.codex.zhou/files/runtime/prefix 2>/dev/null || true
+              docker exec "$CONTAINER_NAME" free -h 2>/dev/null || true
+            else
+              echo "Builder container is not currently visible."
+            fi
+            echo "--- Last build output ---"
+            tail -n 8 "$BUILD_LOG" 2>/dev/null | cut -c1-500 || true
+            sleep 120
+          done
+          BUILD_STATUS=0
+          wait "$BUILD_PID" || BUILD_STATUS=$?
+          echo "===== Runtime build exited with status $BUILD_STATUS ====="
+          echo "--- Final build output ---"
+          tail -n 160 "$BUILD_LOG" | cut -c1-1000 || true
+          exit "$BUILD_STATUS"
+
+      - name: Upload ARM64 runtime build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm64-runtime-build-diagnostics
+          path: ${{ runner.temp }}/private-runtime-build.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Validate bootstrap and write provenance
         run: |

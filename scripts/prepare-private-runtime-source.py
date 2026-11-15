@@ -59,6 +59,33 @@ def main() -> None:
         raise SystemExit("Pinned APR-util SHA-256 changed unexpectedly; review the recipe before building")
     apr_util_path.write_text(apr_util, encoding="utf-8")
 
+    # The Android client provides its own native Git UI. Git's optional
+    # gitk/git-gui, git-svn and git-p4 integrations are not part of this
+    # runtime: they pull Tcl/Tk + X11, Perl/Subversion and Python toolchains
+    # into an otherwise small ARM64 CLI environment. Keep core Git and HTTPS.
+    git_recipe_path = source / "packages/git/build.sh"
+    if not git_recipe_path.is_file():
+        raise SystemExit(f"Missing pinned Git recipe: {git_recipe_path}")
+    git_recipe = git_recipe_path.read_text(encoding="utf-8")
+    git_recipe = replace_once(
+        git_recipe,
+        "--with-tcltk=$TERMUX_PREFIX/bin/wish\\n",
+        "",
+        "omit optional Git GUI/Tcl-Tk configure dependency",
+    )
+    git_recipe = replace_once(
+        git_recipe,
+        "NO_GETTEXT=1\\n",
+        "NO_GETTEXT=1\\nNO_TCLTK=1\\nNO_PERL=1\\nNO_PYTHON=1\\n",
+        "disable optional Git GUI, Perl and Python integrations",
+    )
+    if "--with-tcltk=" in git_recipe or any(
+        flag not in git_recipe
+        for flag in ("NO_TCLTK=1", "NO_PERL=1", "NO_PYTHON=1")
+    ):
+        raise SystemExit("Pinned Git recipe still enables optional GUI/Perl/Python integrations")
+    git_recipe_path.write_text(git_recipe, encoding="utf-8")
+
     properties_path = source / "scripts/properties.sh"
     bootstrap_path = source / "scripts/build-bootstraps.sh"
     docker_runner_path = source / "scripts/run-docker.sh"

@@ -27,7 +27,7 @@
     "termux-exec",
     "codex"
   ],
-  "notes": "Debug and release variants share the exact applicationId com.codex.zhou; the bootstrap is compiled for this package id. The private Codex runtime intentionally excludes termux-tools and its termux-am/termux-am-socket Android app-launching helpers; Bash command-not-found integration is optional and guarded.",
+  "notes": "Debug and release variants share the exact applicationId com.codex.zhou; the bootstrap is compiled for this package id. The private Codex runtime excludes termux-tools/termux-am app-launching helpers and disables Git GUI/gitk, git-svn and git-p4 integrations to avoid optional Tcl/Tk/X11, Perl/Subversion and Python build chains. Core Git, HTTPS remote operations, OpenSSL and libcurl remain enabled; Bash command-not-found integration is optional and guarded.",
   "codexVersion": "0.169.0",
   "codexPackage": "codex",
   "codexHelper": "codex-code-mode-host",
