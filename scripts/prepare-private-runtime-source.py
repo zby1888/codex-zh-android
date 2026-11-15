@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -18,17 +16,6 @@ def replace_once(content: str, old: str, new: str, label: str) -> str:
     if count != 1:
         raise SystemExit(f"{label}: expected exactly one match, found {count}")
     return content.replace(old, new, 1)
-
-
-def locked_ref(name: str) -> str:
-    lock = (ROOT / "runtime/sources.lock.yml").read_text(encoding="utf-8")
-    entries = re.findall(r"(?ms)^  - name: ([^\n]+)\n(.*?)(?=^  - name: |\Z)", lock)
-    for source_name, body in entries:
-        if source_name.strip() == name:
-            match = re.search(r"(?m)^    ref: ([^\n]+)$", body)
-            if match:
-                return match.group(1).strip().strip("'\"")
-    raise SystemExit(f"Missing pinned source ref in sources.lock.yml: {name}")
 
 
 def main() -> None:
