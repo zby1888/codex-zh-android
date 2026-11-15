@@ -34,6 +34,31 @@
 | 快捷命令 / 斜杠命令 | 输入框命令面板 | 对应 App Server 方法或 CLI 命令映射 | 每条命令标注是否支持、是否需要终端回退 |
 | 日志、错误和诊断 | 运行状态 / 诊断页 | App Server 通知、进程 stderr、结构化错误 | 不泄露 API Key、环境变量密钥或隐私内容 |
 
+## OpenCode 与 Operit 的参考映射
+
+以下是需要持续对照的上游能力。它们是产品和工程参考，不是要求本项目引入第二套 Agent Runtime。
+
+| 参考项目 | 借鉴能力 | 本项目中的落点 | 边界 |
+|---|---|---|---|
+| OpenCode | 会话列表、恢复、分支、归档和消息历史 | Codex 会话管理页 / CodexAgentController | 通过 Codex App Server 实现，不复用 OpenCode session API |
+| OpenCode | 事件驱动的消息与工具状态、可折叠工具输出 | 聊天时间线、执行详情卡片 | 以 Codex item/turn 事件为数据源 |
+| OpenCode | Build / Plan 等 Agent 模式、子 Agent 和权限配置 | Agent 模式选择、计划视图、子任务视图 | 仅在锁定版 Codex 暴露对应能力时启用 |
+| OpenCode | MCP、Skills、自定义命令、项目级配置 | 工具与扩展中心、命令面板、项目设置 | 按 Codex 支持的配置格式和协议适配 |
+| OpenCode | Git worktree 和项目隔离 | 项目 / 工作区管理 | 由本地 Git 执行，操作前展示目录和风险 |
+| Operit | 移动端任务工作台、附件、上下文和执行进度 | Android 聊天首页、任务详情和附件栏 | 任务执行仍交给 Codex Agent |
+| Operit | 文件、终端、浏览器和 Android 能力整合 | 工具中心、文件页、PTY 终端、可选 Android 工具 | Android 系统能力必须逐项授权，不默认开放 |
+| Operit | 工作流、ToolPkg、MCP、Skills | 扩展中心和工作流入口 | 先做 MCP / Skills 稳定路径，再评估 ToolPkg 兼容层 |
+| Operit | 面向手机的权限确认和可视化工具结果 | 统一审批队列、工具调用卡片 | 不绕过 Codex 审批；App 自有工具也必须有独立权限策略 |
+
+### 每项参考功能的开发记录
+
+新增功能时，在 PR 描述或对应设计文档中记录：
+1. 参考了 OpenCode / Operit 的哪个具体功能或交互；
+2. 本项目使用哪个 Codex App Server 方法、CLI 能力或 Android 原生接口；
+3. 上游功能与 Codex 能力不一致的部分如何处理；
+4. 许可证和第三方依赖是否允许复用；
+5. 自动化测试与 Android 实机验收方式。
+
 ## 必须保留的两个独立执行通道
 
 1. **Agent 通道**：Android 启动私有运行时里的 `codex app-server`，通过 JSONL/stdin/stdout 与 App Server 通信。它负责聊天、会话、工具调用、审批和 Diff。
