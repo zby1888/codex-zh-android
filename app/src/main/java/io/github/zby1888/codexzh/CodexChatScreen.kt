@@ -356,6 +356,18 @@ internal class CodexChatUiState {
                 val itemId = params.optString("itemId")
                 append("mcp:$itemId", "MCP 工具进度", params.optString("message"), true)
             }
+            "turn/diff/updated" -> {
+                val turnId = params.optString("turnId")
+                val diff = params.optString("diff")
+                if (diff.isNotBlank()) {
+                    upsert(
+                        "diff:${turnId.ifBlank { params.optString("threadId") }}",
+                        "代码变更 Diff",
+                        diff,
+                        true
+                    )
+                }
+            }
             "item/fileChange/patchUpdated" -> {
                 val changes = params.optJSONArray("changes")
                 val names = buildList {
