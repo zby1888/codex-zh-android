@@ -9,6 +9,7 @@ import androidx.compose.runtime.setValue
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.atomic.AtomicBoolean
 
 internal data class TerminalCell(val text:String,val width:Int,val foreground:Int?,val background:Int?,val flags:Int)
 internal data class TerminalFrame(
@@ -44,6 +45,7 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
     @Volatile private var handle=0L
     private var readerJob:Job?=null
     @Volatile private var scrollbackCache:List<List<TerminalCell>> = emptyList()
+    private val scrollbackLoadInProgress = AtomicBoolean(false)
 
     var frame by mutableStateOf(TerminalFrame.blank(24,80)); private set
     var isRunning by mutableStateOf(false); private set
@@ -187,7 +189,7 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
     /** Fetch libvterm's bounded history only when the user starts scrolling. */
     fun loadScrollback() {
         val activeHandle=handle
-        if(activeHandle==0L)return
+        if(activeHandle==0L || !scrollbackLoadInProgress.compareAndSet(false,true))return
         scope.launch {
             try {
                 val loaded:List<List<TerminalCell>>?=nativeMutex.withLock {
@@ -204,6 +206,8 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
                 withContext(Dispatchers.Main.immediate) {
                     if(handle==activeHandle) message=error.message?:"读取终端滚动缓冲失败"
                 }
+            } finally {
+                scrollbackLoadInProgress.set(false)
             }
         }
     }

@@ -68,8 +68,10 @@ if "enter_sends_message" not in chat or "ImeAction.Default" not in chat or "ImeA
     errors.append("CodexChatScreen.kt: Enter-send/newline preference is missing")
 if "state = messageListState" not in chat or "snapshotFlow" not in chat:
     errors.append("CodexChatScreen.kt: message list follow-latest behavior is missing")
-if "60_000L" not in chat or "activityRevision" not in chat:
-    errors.append("CodexChatScreen.kt: send inactivity feedback is missing")
+if "fun monitorTurn(" not in chat or "thread/turns/list" not in chat:
+    errors.append("CodexChatScreen.kt: server-backed turn status monitoring is missing")
+if "requestFinalItems(thread, turnId)" not in chat or "appendListedTurnItems(response)" not in chat:
+    errors.append("CodexChatScreen.kt: final conversation item recovery is missing")
 if "Button(\n                        onClick = { submitPrompt() }" not in chat:
     errors.append("CodexChatScreen.kt: send button is not in the composer input row")
 if "terminalFontScale" not in main or "10.5f * density * terminalFontScale" not in main:
