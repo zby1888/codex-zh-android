@@ -13,6 +13,8 @@ on:
       - "app/src/main/java/io/github/zby1888/codexzh/RuntimeManager.kt"
       - "app/src/main/java/io/github/zby1888/codexzh/CodexAppServerClient.kt"
       - "app/src/main/java/io/github/zby1888/codexzh/PtyTerminalSession.kt"
+      - "app/src/main/cpp/native_pty_terminal.cpp"
+      - "app/src/main/cpp/native_pty_terminal.cpp"
       - ".github/workflows/build-private-runtime.yml"
   # Documentation-only edits under runtime/ do not start the multi-hour ARM64 build.
   pull_request:
