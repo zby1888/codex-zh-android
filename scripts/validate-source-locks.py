@@ -76,6 +76,8 @@ if "std::unordered_map<jlong,std::shared_ptr<Terminal>> gTerminals" not in nativ
     raise SystemExit("Native PTY handles must be held by the lifetime-safe registry")
 if "reinterpret_cast<Terminal*>(handle)" in native_pty:
     raise SystemExit("Raw native PTY pointers must never cross the JNI handle boundary")
+if "vterm_screen_set_callbacks(terminal->screen,&callbacks,terminal.get())" not in native_pty:
+    raise SystemExit("libvterm callback user data must receive the raw Terminal pointer, not the shared_ptr wrapper")
 if "removeTerminal(handle)" not in native_pty or "term->closing=true" not in native_pty:
     raise SystemExit("Native PTY close must revoke handles before freeing PTY resources")
 
