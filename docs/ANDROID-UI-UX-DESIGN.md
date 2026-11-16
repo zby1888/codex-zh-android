@@ -108,3 +108,12 @@ RikkaHub 使用 AGPL-3.0、Operit 使用 LGPL-3.0、OpenCode 使用 MIT。此处
 - OpenCode：按类型组织时间线；Codex 锁定版本的 `thread/fork.lastTurnId` 是本项目实际分支接口：https://github.com/anomalyco/opencode/blob/dev/packages/session-ui/src/timeline/session-timeline-row.tsx
 
 只借鉴交互和架构，不复制上游源码或资源。Operit 使用 LGPL-3.0、RikkaHub 使用 AGPL-3.0、OpenCode 使用 MIT；任何代码移植都要先单独审查许可证和依赖义务。
+
+
+## 首次服务器/模型引导与对话时间显示
+
+- 首次准备好 ARM64 私有运行环境后，如果还没有 Codex Agent 默认服务商，显示两步引导：先填写 Responses API 服务器地址、API Key、模型 ID 和可选自定义请求头，再连接服务器读取模型目录并选择模型。
+- API Key 与自定义请求头继续通过 Android Keystore 加密保存。引导完成后才进入主界面；保存过的服务器和模型在后续启动时自动恢复。
+- MCP 页面只保留 MCP 专属操作，不放置服务商设置快捷按钮。
+- 聊天输入框与发送按钮必须保持同一行；文本输入区占据主要宽度，发送按钮使用稳定宽度，工具和回车模式放在第二行。
+- 用户消息和助手消息显示时间；助手回复结束后显示本轮实际耗时。历史时间优先使用 Codex App Server 的 `startedAtMs` / `completedAtMs`，若服务端未记录则不显示伪造的历史时间。正在进行的轮次按 `turn/started` 与 `turn/completed` 事件计算耗时。

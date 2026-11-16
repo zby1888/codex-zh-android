@@ -78,6 +78,10 @@ private fun CodexZhApp() {
     val context = LocalContext.current
     var tab by remember { mutableStateOf(Tab.Chat) }
     val chatState = remember(context) { CodexChatUiState(context) }
+    val providerRepository = remember(context) { ProviderRepository(context) }
+    var showSetupWizard by remember(providerRepository) {
+        mutableStateOf(providerRepository.getDefaultCodexAgent() == null)
+    }
     val runtimeManager = remember(context) { RuntimeManager(context) }
     val runtimeInstaller = remember(context) { RuntimeBootstrapInstaller(context, runtimeManager) }
     val terminalSession = remember(runtimeManager) { PtyTerminalSession(runtimeManager.paths) }
@@ -144,6 +148,12 @@ private fun CodexZhApp() {
                 progress = installProgress,
                 busy = installingRuntime,
                 onRetry = { installAttempt++ }
+            )
+        } else if (showSetupWizard) {
+            CodexSetupWizardScreen(
+                modifier = Modifier.fillMaxSize(),
+                state = chatState,
+                onComplete = { showSetupWizard = false }
             )
         } else {
             Scaffold(
@@ -212,9 +222,7 @@ private fun CodexZhApp() {
                                 Modifier.padding(padding), chatState, runtimeManager, runtimeInstaller, terminalSession
                             )
                             Tab.Providers -> ProviderScreen(Modifier.padding(padding))
-                            Tab.Mcp -> CodexMcpScreen(Modifier.padding(padding), chatState) {
-                                tab = Tab.Providers
-                            }
+                            Tab.Mcp -> CodexMcpScreen(Modifier.padding(padding), chatState)
                             Tab.Diagnostics -> CrashLogScreen(Modifier.padding(padding))
                         }
                     }

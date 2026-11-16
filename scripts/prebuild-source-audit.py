@@ -132,6 +132,8 @@ if "isPlainTextOnly" not in chat or "userMessagesPerTurn[itemTurnId] == 1" not i
 chat_state = chat
 mcp_controller = (ROOT / "app/src/main/java/io/github/zby1888/codexzh/CodexMcpController.kt").read_text()
 app_server_client = (ROOT / "app/src/main/java/io/github/zby1888/codexzh/CodexAppServerClient.kt").read_text()
+setup_wizard = (ROOT / "app/src/main/java/io/github/zby1888/codexzh/CodexSetupWizardScreen.kt").read_text()
+mcp_screen = (ROOT / "app/src/main/java/io/github/zby1888/codexzh/CodexMcpScreen.kt").read_text()
 if "CodexChatUiState(context)" not in main or "internal class CodexChatUiState(context: Context)" not in chat_state:
     errors.append("CodexChatScreen.kt/MainActivity.kt: chat preferences must survive Activity/process recreation")
 if 'selected_model_id' not in chat_state or 'selected_reasoning_effort' not in chat_state or "persistModelSelection()" not in chat_state:
@@ -150,8 +152,20 @@ if "Icon(item.icon()" not in main or "alwaysShowLabel = false" not in main or "m
     errors.append("MainActivity.kt: navigation must use compact vector icons rather than text glyphs")
 if "Root 权限管理" not in main or "showRootDetails" not in main:
     errors.append("MainActivity.kt: Root permission entry must be visible without scrolling the terminal shortcut row")
-if "minLines = 2" not in chat_state or "Button(\n                        onClick = { submitPrompt() }" not in chat_state:
-    errors.append("CodexChatScreen.kt: composer must use a full-width multiline editor with a separate send action row")
+composer_start = chat_state.rfind("shape = RoundedCornerShape(22.dp)")
+composer = chat_state[composer_start:] if composer_start >= 0 else ""
+if "minLines = 2" not in composer or "modifier = Modifier.weight(1f)" not in composer:
+    errors.append("CodexChatScreen.kt: composer input must be multiline and take the available horizontal width")
+if "Button(\n                        onClick = { submitPrompt() }" not in composer or "modifier = Modifier.width(76.dp)" not in composer:
+    errors.append("CodexChatScreen.kt: send button must sit beside the input in the same horizontal row")
+if "CodexSetupWizardScreen(" not in main or "saveAndConnect()" not in setup_wizard:
+    errors.append("MainActivity.kt: first-run onboarding must guide the user through server setup")
+if "API 基础地址" not in setup_wizard or "API Key" not in setup_wizard or "选择模型" not in setup_wizard:
+    errors.append("CodexSetupWizardScreen.kt: onboarding must cover endpoint, credentials and model selection")
+if "服务商设置" in mcp_screen or "onOpenProviders" in mcp_screen:
+    errors.append("CodexMcpScreen.kt: provider settings shortcut must not be present on the MCP page")
+if "formatMessageTime" not in chat_state or "formatElapsedTime" not in chat_state or "recordTurnDuration" not in chat_state:
+    errors.append("CodexChatScreen.kt: message timestamps and actual turn-duration display are missing")
 
 if errors:
     print("PREBUILD SOURCE AUDIT FAILED")

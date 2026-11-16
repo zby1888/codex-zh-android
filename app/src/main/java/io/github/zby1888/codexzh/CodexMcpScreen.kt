@@ -38,8 +38,7 @@ import kotlinx.coroutines.withContext
 @Composable
 internal fun CodexMcpScreen(
     modifier: Modifier = Modifier,
-    state: CodexChatUiState,
-    onOpenProviders: () -> Unit
+    state: CodexChatUiState
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -439,7 +438,6 @@ internal fun CodexMcpScreen(
                         else Text(if (state.controller?.isConnected == true) "刷新服务状态" else "连接 Codex 并读取")
                     }
                     OutlinedButton(onClick = { showAddDialog = true }, enabled = !busy) { Text("添加 MCP") }
-                    OutlinedButton(onClick = onOpenProviders) { Text("服务商设置") }
                 }
                 Text(
                     if (state.controller?.isConnected == true) "Codex App Server：已连接"
