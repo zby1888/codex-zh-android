@@ -79,10 +79,31 @@ internal fun CodexMcpScreen(
 
     suspend fun readServers(agent: CodexAgentController) {
         val mcp = agent.mcpController()
-        val result = withContext(Dispatchers.IO) {
-            mcp.listServers(threadId = state.threadId, limit = 50)
+        val allServers = org.json.JSONArray()
+        var cursor: String? = null
+        var pageCount = 0
+        do {
+            val page = withContext(Dispatchers.IO) {
+                mcp.listServers(
+                    threadId = state.threadId,
+                    cursor = cursor,
+                    limit = 50,
+                    detail = "toolsAndAuthOnly"
+                )
+            }
+            val data = page.optJSONArray("data")
+                ?: throw IllegalStateException("Codex 没有返回 MCP 状态列表，现有显示内容已保留")
+            for (index in 0 until data.length()) {
+                data.optJSONObject(index)?.let { allServers.put(it) }
+            }
+            cursor = page.optString("nextCursor")
+                .takeIf { it.isNotBlank() && it != "null" }
+            pageCount++
+        } while (cursor != null && pageCount < 20)
+        check(cursor == null) {
+            "MCP 服务数量超过安全分页上限，未替换现有列表"
         }
-        state.replaceMcpServers(result)
+        state.replaceMcpServers(org.json.JSONObject().put("data", allServers))
     }
 
     fun saveServer() {
@@ -255,12 +276,18 @@ internal fun CodexMcpScreen(
             try {
                 val agent = ensureAgent()
                 val mcp = agent.mcpController()
-                withContext(Dispatchers.IO) { mcp.refreshServers() }
-                val result = withContext(Dispatchers.IO) {
-                    mcp.listServers(threadId = state.threadId, limit = 50)
+                val reloadWarning = try {
+                    withContext(Dispatchers.IO) { mcp.refreshServers() }
+                    null
+                } catch (failure: Exception) {
+                    failure.message?.take(300) ?: "Codex 未能确认 MCP 配置重载结果"
                 }
-                state.replaceMcpServers(result)
-                message = "MCP 服务状态已更新"
+                // Reloading the registry and querying its status are separate operations.
+                // A reload warning must not prevent the current status list from being read.
+                readServers(agent)
+                message = reloadWarning?.let {
+                    "已重新读取 MCP 状态；配置重载提示：$it"
+                } ?: "MCP 服务状态已更新"
             } catch (failure: Exception) {
                 error = failure.message?.take(600) ?: "读取 MCP 服务状态失败"
             } finally {

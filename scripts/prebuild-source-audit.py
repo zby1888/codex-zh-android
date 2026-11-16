@@ -129,6 +129,30 @@ if 'Text("编辑并重发")' not in chat or "val turnId: String? = null" not in 
 if "isPlainTextOnly" not in chat or "userMessagesPerTurn[itemTurnId] == 1" not in chat:
     errors.append("CodexChatScreen.kt: editing must be disabled for attachments and multiple user prompts sharing a turn")
 
+chat_state = chat
+mcp_controller = (ROOT / "app/src/main/java/io/github/zby1888/codexzh/CodexMcpController.kt").read_text()
+app_server_client = (ROOT / "app/src/main/java/io/github/zby1888/codexzh/CodexAppServerClient.kt").read_text()
+if "CodexChatUiState(context)" not in main or "internal class CodexChatUiState(context: Context)" not in chat_state:
+    errors.append("CodexChatScreen.kt/MainActivity.kt: chat preferences must survive Activity/process recreation")
+if 'selected_model_id' not in chat_state or 'selected_reasoning_effort' not in chat_state or "persistModelSelection()" not in chat_state:
+    errors.append("CodexChatScreen.kt: model and reasoning selection must be persisted")
+if "LaunchedEffect(autoStartAttempt)" not in chat_state or "agent.listModels(includeHidden = false)" not in chat_state:
+    errors.append("CodexChatScreen.kt: Codex App Server and model list must start automatically on chat entry")
+if "重新连接 Codex" not in chat_state:
+    errors.append("CodexChatScreen.kt: automatic startup failure must offer a retry action")
+if 'client.request("config/mcpServer/reload", null)' not in mcp_controller:
+    errors.append("CodexMcpController.kt: MCP reload must use the pinned protocol method without params")
+if '"mcpServer/refresh"' in mcp_controller:
+    errors.append("CodexMcpController.kt: obsolete MCP refresh RPC must not be used")
+if "toolsAndAuthOnly" not in mcp_controller or 'if (params != null) requestMessage.put("params", params)' not in app_server_client:
+    errors.append("Codex MCP status listing must use lightweight detail and support omitted JSON-RPC params")
+if "Icon(item.icon()" not in main or "alwaysShowLabel = false" not in main or "material-icons-extended" not in (ROOT / "app/build.gradle.kts").read_text():
+    errors.append("MainActivity.kt: navigation must use compact vector icons rather than text glyphs")
+if "Root 权限管理" not in main or "showRootDetails" not in main:
+    errors.append("MainActivity.kt: Root permission entry must be visible without scrolling the terminal shortcut row")
+if "minLines = 2" not in chat_state or "Button(\n                        onClick = { submitPrompt() }" not in chat_state:
+    errors.append("CodexChatScreen.kt: composer must use a full-width multiline editor with a separate send action row")
+
 if errors:
     print("PREBUILD SOURCE AUDIT FAILED")
     for item in errors:

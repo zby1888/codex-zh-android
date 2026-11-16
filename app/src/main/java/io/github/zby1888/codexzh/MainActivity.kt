@@ -25,10 +25,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.BugReport
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.Extension
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -53,8 +60,16 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Tab(val label: String, val glyph: String) {
-    Chat("聊天", "聊"), Terminal("终端", ">_"), Providers("服务商", "模"), Mcp("MCP 工具", "M"), Diagnostics("诊断", "记")
+private enum class Tab(val label: String) {
+    Chat("聊天"), Terminal("终端"), Providers("服务商"), Mcp("MCP 工具"), Diagnostics("诊断")
+}
+
+private fun Tab.icon(): ImageVector = when (this) {
+    Tab.Chat -> Icons.Outlined.ChatBubbleOutline
+    Tab.Terminal -> Icons.Outlined.Code
+    Tab.Providers -> Icons.Outlined.Tune
+    Tab.Mcp -> Icons.Outlined.Extension
+    Tab.Diagnostics -> Icons.Outlined.BugReport
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -62,7 +77,7 @@ private enum class Tab(val label: String, val glyph: String) {
 private fun CodexZhApp() {
     val context = LocalContext.current
     var tab by remember { mutableStateOf(Tab.Chat) }
-    val chatState = remember { CodexChatUiState() }
+    val chatState = remember(context) { CodexChatUiState(context) }
     val runtimeManager = remember(context) { RuntimeManager(context) }
     val runtimeInstaller = remember(context) { RuntimeBootstrapInstaller(context, runtimeManager) }
     val terminalSession = remember(runtimeManager) { PtyTerminalSession(runtimeManager.paths) }
@@ -152,13 +167,20 @@ private fun CodexZhApp() {
                         enter = fadeIn(tween(160)) + slideInVertically(tween(180)) { it / 2 },
                         exit = fadeOut(tween(110)) + slideOutVertically(tween(150)) { it / 2 }
                     ) {
-                        NavigationBar {
+                        NavigationBar(
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            tonalElevation = 2.dp
+                        ) {
                             Tab.entries.forEach { item ->
                                 NavigationBarItem(
                                     selected = tab == item,
                                     onClick = { tab = item },
-                                    icon = { Text(item.glyph) },
-                                    label = { Text(item.label) }
+                                    icon = { Icon(item.icon(), contentDescription = item.label) },
+                                    label = { Text(item.label) },
+                                    alwaysShowLabel = false,
+                                    colors = NavigationBarItemDefaults.colors(
+                                        indicatorColor = MaterialTheme.colorScheme.secondaryContainer
+                                    )
                                 )
                             }
                         }
@@ -463,6 +485,85 @@ private fun TerminalScreen(
             ) { Text(if (terminal.isRunning) "结束" else "启动") }
         }
 
+        Card {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("Root", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                    Text("Root 权限管理", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "仅用于独立终端；Codex Agent 始终保持普通应用权限",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1
+                    )
+                }
+                Text(
+                    if (rootStatus.isGranted) "已授权" else "默认关闭",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (rootStatus.isGranted) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                TextButton(onClick = { showRootDetails = !showRootDetails }) {
+                    Text(if (showRootDetails) "收起" else "管理")
+                }
+            }
+        }
+
+        if (showRootDetails) {
+            Card {
+                Column(
+                    Modifier.fillMaxWidth().padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Text("Root 调试终端", modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (rootStatus.isGranted) "已授权" else "默认关闭",
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                    Text(rootStatus.message, style = MaterialTheme.typography.labelSmall)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch {
+                                    requestingRoot = true
+                                    try {
+                                        rootStatus = rootAccessManager.requestAccess()
+                                        if (!rootStatus.isGranted) useRootShell = false
+                                    } finally {
+                                        requestingRoot = false
+                                    }
+                                }
+                            },
+                            enabled = !requestingRoot && !busy && !terminal.isRunning
+                        ) {
+                            Text(if (requestingRoot) "等待 Root 授权…" else "申请 / 检查 Root")
+                        }
+                        Spacer(Modifier.weight(1f))
+                        Text("本次使用 Root", style = MaterialTheme.typography.bodySmall)
+                        Switch(
+                            checked = useRootShell,
+                            onCheckedChange = { useRootShell = it },
+                            enabled = rootStatus.isGranted && !busy && !terminal.isRunning
+                        )
+                    }
+                    Text(
+                        "Root 只用于独立终端，不会提升 Codex Agent。Root 创建的项目文件可能归 root 所有。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
         if (terminal.isRunning && terminal.workingDirectory != currentWorkspace) {
             TextButton(
                 onClick = { terminal.changeDirectory(currentWorkspace) },
@@ -523,60 +624,6 @@ private fun TerminalScreen(
             TerminalKeyButton("←", terminal.isRunning) { terminal.sendInput("\u001b[D") }
             TerminalKeyButton("→", terminal.isRunning) { terminal.sendInput("\u001b[C") }
             TerminalKeyButton("清屏", terminal.isRunning) { terminal.sendInput("\u001b[2J\u001b[H") }
-            TextButton(onClick = { showRootDetails = !showRootDetails }) {
-                Text(if (showRootDetails) "收起 Root" else "Root 设置")
-            }
-        }
-
-        if (showRootDetails) {
-            Card {
-                Column(
-                    Modifier.fillMaxWidth().padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Text("Root 调试终端", modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-                        Text(
-                            if (rootStatus.isGranted) "已授权" else "默认关闭",
-                            style = MaterialTheme.typography.labelSmall
-                        )
-                    }
-                    Text(rootStatus.message, style = MaterialTheme.typography.labelSmall)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                scope.launch {
-                                    requestingRoot = true
-                                    try {
-                                        rootStatus = rootAccessManager.requestAccess()
-                                        if (!rootStatus.isGranted) useRootShell = false
-                                    } finally {
-                                        requestingRoot = false
-                                    }
-                                }
-                            },
-                            enabled = !requestingRoot && !busy && !terminal.isRunning
-                        ) {
-                            Text(if (requestingRoot) "等待 Root 授权…" else "申请 / 检查 Root")
-                        }
-                        Spacer(Modifier.weight(1f))
-                        Text("本次使用 Root", style = MaterialTheme.typography.bodySmall)
-                        Switch(
-                            checked = useRootShell,
-                            onCheckedChange = { useRootShell = it },
-                            enabled = rootStatus.isGranted && !busy && !terminal.isRunning
-                        )
-                    }
-                    Text(
-                        "Root 只用于独立终端，不会提升 Codex Agent。Root 创建的项目文件可能归 root 所有。",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
         }
 
         Row(
