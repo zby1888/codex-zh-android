@@ -48,6 +48,19 @@ if not application_id or application_id.group(1) != config.get("appPackageName")
 
 runtime_manager = (path.parent.parent / "app" / "src" / "main" / "java" / "io" / "github" / "zby1888" / "codexzh" / "RuntimeManager.kt").read_text(encoding="utf-8")
 installer = (path.parent.parent / "app" / "src" / "main" / "java" / "io" / "github" / "zby1888" / "codexzh" / "RuntimeBootstrapInstaller.kt").read_text(encoding="utf-8")
+archive_validator = (path.parent.parent / "scripts" / "validate-private-runtime-bootstrap.py").read_text(encoding="utf-8")
+for limit_name in ("MAX_ENTRY_BYTES", "MAX_TOTAL_BYTES"):
+    kotlin_limit = re.search(
+        rf"{limit_name}\\s*=\\s*(\\d+)L\\s*\\*\\s*1024L\\s*\\*\\s*1024L",
+        installer,
+    )
+    python_limit = re.search(
+        rf"^{limit_name}\\s*=\\s*(\\d+)\\s*\\*\\s*1024\\s*\\*\\s*1024\\s*$",
+        archive_validator,
+        re.MULTILINE,
+    )
+    if not kotlin_limit or not python_limit or kotlin_limit.group(1) != python_limit.group(1):
+        raise SystemExit(f"{limit_name} differs between Android installer and archive validator")
 version = re.search(r'EXPECTED_CODEX_VERSION\s*=\s*"([^"]+)"', runtime_manager)
 if not version or version.group(1) != config.get("codexVersion"):
     raise SystemExit("Android runtime version check does not match the pinned Codex package version")
