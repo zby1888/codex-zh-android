@@ -77,7 +77,7 @@ internal fun CodexSetupWizardScreen(
             require(name.matches(Regex("[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}"))) {
                 "请求头名称不合法：$name"
             }
-            require(headerValue.isNotEmpty() && headerValue.none { it == '\\r' || it == '\\n' }) {
+            require(headerValue.isNotEmpty() && headerValue.none { it == '\r' || it == '\n' }) {
                 "请求头值不能为空或包含换行：$name"
             }
             require(!result.containsKey(name)) { "请求头重复：$name" }

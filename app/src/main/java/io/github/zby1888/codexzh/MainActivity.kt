@@ -266,7 +266,7 @@ private fun RuntimeOnboardingScreen(
             )
             Text(
                 when {
-                    busy -> "首次启动正在准备独立运行环境，完成后会自动进入聊天页面。"
+                    busy -> "首次启动正在准备独立运行环境，完成后会引导设置服务器和模型，再进入聊天页面。"
                     unsupported -> "当前设备没有提供所需的 ARM64 运行架构。"
                     failed -> "运行环境没有准备成功。可以查看原因后重试。"
                     else -> "正在确认运行环境状态…"
