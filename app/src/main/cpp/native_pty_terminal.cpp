@@ -282,7 +282,7 @@ Java_io_github_zby1888_codexzh_NativePtyBridge_nativeRead(JNIEnv* env,jobject,jl
     if(ready<0)result=-1;
     else if(ready>0) {
         ssize_t n;do{n=read(term->master,bytes,static_cast<size_t>(capacity));}while(n<0&&errno==EINTR);
-        if(n>0){vterm_input_write(term->vt,reinterpret_cast<const char*>(bytes),static_cast<size_t>(n));vterm_screen_flush_damage(term->screen);flushResponses(term);result=static_cast<jint>(n);}
+        if(n>0){vterm_input_write(term->vt,reinterpret_cast<const char*>(bytes),static_cast<size_t>(n));vterm_screen_flush_damage(term->screen);flushResponses(term.get());result=static_cast<jint>(n);}
         else if(n==0||(n<0&&errno==EIO))result=-1;
         else if(errno==EAGAIN||errno==EWOULDBLOCK)result=0;
         else result=-1;
@@ -322,7 +322,7 @@ extern "C" JNIEXPORT jbyteArray JNICALL
 Java_io_github_zby1888_codexzh_NativePtyBridge_nativeSnapshot(JNIEnv* env,jobject,jlong handle) {
     auto term=findTerminal(handle);if(!term)return nullptr;
     std::lock_guard<std::mutex> lock(term->mutex);if(term->closing||!term->vt||!term->screen)return nullptr;
-    const auto bytes=makeSnapshot(term);if(bytes.size()>static_cast<size_t>(INT32_MAX))return nullptr;
+    const auto bytes=makeSnapshot(term.get());if(bytes.size()>static_cast<size_t>(INT32_MAX))return nullptr;
     jbyteArray result=env->NewByteArray(static_cast<jsize>(bytes.size()));
     if(result&&!bytes.empty())env->SetByteArrayRegion(result,0,static_cast<jsize>(bytes.size()),reinterpret_cast<const jbyte*>(bytes.data()));
     return result;
@@ -332,7 +332,7 @@ Java_io_github_zby1888_codexzh_NativePtyBridge_nativeExitCode(JNIEnv*,jobject,jl
     auto term=findTerminal(handle);if(!term)return 255;
     std::lock_guard<std::mutex> lock(term->mutex);
     if(term->closing)return 255;
-    reap(term);return term->reaped?term->exitCode:kRunning;
+    reap(term.get());return term->reaped?term->exitCode:kRunning;
 }
 extern "C" JNIEXPORT void JNICALL
 Java_io_github_zby1888_codexzh_NativePtyBridge_nativeClose(JNIEnv*,jobject,jlong handle) {
@@ -343,9 +343,9 @@ Java_io_github_zby1888_codexzh_NativePtyBridge_nativeClose(JNIEnv*,jobject,jlong
         term->closing=true;
         if(term->child>0&&!term->reaped) {
             kill(-term->child,SIGHUP);
-            for(int i=0;i<10&&!term->reaped;++i){reap(term);usleep(20000);}
+            for(int i=0;i<10&&!term->reaped;++i){reap(term.get());usleep(20000);}
             if(!term->reaped)kill(-term->child,SIGTERM);
-            for(int i=0;i<10&&!term->reaped;++i){reap(term);usleep(20000);}
+            for(int i=0;i<10&&!term->reaped;++i){reap(term.get());usleep(20000);}
             if(!term->reaped){kill(-term->child,SIGKILL);int status=0;while(waitpid(term->child,&status,0)<0&&errno==EINTR){}term->reaped=true;}
         }
         if(term->master>=0){close(term->master);term->master=-1;}
