@@ -71,7 +71,7 @@ jobs:
 
       - name: Ensure exact package cache directories exist
         run: |
-          mkdir -p "$HOME/.termux-build" vendor/termux-packages/output
+          mkdir -p "$HOME/.termux-build" vendor/termux-packages/output/bootstrap-dist
 
       # Exact cache only: package markers, prefix, sources, Rustup/Cargo and
       # matching .debs must always come from the same package profile.
@@ -89,10 +89,10 @@ jobs:
         run: |
           mkdir -p "$HOME/.termux-build" "$HOME/.termux-build/prefix" \
             "$HOME/.termux-build/.built-packages" "$HOME/.termux-build/cargo" \
-            "$HOME/.termux-build/rustup" vendor/termux-packages/output
+            "$HOME/.termux-build/rustup" vendor/termux-packages/output/bootstrap-dist
           chmod 0777 "$HOME/.termux-build" "$HOME/.termux-build/prefix" \
             "$HOME/.termux-build/.built-packages" "$HOME/.termux-build/cargo" \
-            "$HOME/.termux-build/rustup" vendor/termux-packages/output
+            "$HOME/.termux-build/rustup" vendor/termux-packages/output vendor/termux-packages/output/bootstrap-dist
           echo "===== Host disk after exact cache restore ====="
           df -h "$HOME"
           echo "===== Cache sizes ====="
@@ -129,7 +129,7 @@ jobs:
           # resource snapshots to the Actions console so the job log stays readable.
           BUILD_LOG="$RUNNER_TEMP/private-runtime-build.log"
           : > "$BUILD_LOG"
-          ./scripts/run-docker.sh bash -c 'cd /home/builder/termux-packages && export TERMUX_PKG_MAKE_PROCESSES=1 CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_HOME=/home/builder/.termux-build/cargo RUSTUP_HOME=/home/builder/.termux-build/rustup TERMUX_PKGS__BUILD__REUSE_BUILT_PACKAGES=true PATH=/home/builder/.termux-build/cargo/bin:$PATH && echo "===== Container disk before build =====" && df -h / /data /data/data/com.codex.zhou/files/runtime/prefix /data/data/.built-packages && free -h && echo "===== Cached package markers =====" && ls -la /data/data/.built-packages | tail -n 20 && ./scripts/build-bootstraps.sh --android10 --architectures aarch64' >"$BUILD_LOG" 2>&1 &
+          ./scripts/run-docker.sh bash -c 'cd /home/builder/termux-packages && export TERMUX_PKG_MAKE_PROCESSES=1 CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_HOME=/home/builder/.termux-build/cargo RUSTUP_HOME=/home/builder/.termux-build/rustup TERMUX_PKGS__BUILD__REUSE_BUILT_PACKAGES=true PATH=/home/builder/.termux-build/cargo/bin:$PATH && echo "===== Container disk before build =====" && df -h / /data /data/data/com.codex.zhou/files/runtime/prefix /data/data/.built-packages && free -h && echo "===== Cached package markers =====" && ls -la /data/data/.built-packages | tail -n 20 && echo "===== Bootstrap output directory preflight =====" && test -d /home/builder/termux-packages/output/bootstrap-dist && test -w /home/builder/termux-packages/output/bootstrap-dist && touch /home/builder/termux-packages/output/bootstrap-dist/.write-test && rm /home/builder/termux-packages/output/bootstrap-dist/.write-test && ./scripts/build-bootstraps.sh --android10 --architectures aarch64' >"$BUILD_LOG" 2>&1 &
           BUILD_PID=$!
           while kill -0 "$BUILD_PID" 2>/dev/null; do
             echo "===== Runtime build heartbeat: $(date -u +'%Y-%m-%dT%H:%M:%SZ') ====="
@@ -184,7 +184,8 @@ jobs:
         run: |
           python3 -m py_compile scripts/validate-private-runtime-bootstrap.py
           mkdir -p runtime/dist
-          cp vendor/termux-packages/bootstrap-dist/bootstrap-aarch64.zip runtime/dist/
+          test -s vendor/termux-packages/output/bootstrap-dist/bootstrap-aarch64.zip
+          cp vendor/termux-packages/output/bootstrap-dist/bootstrap-aarch64.zip runtime/dist/
           python3 scripts/validate-private-runtime-bootstrap.py \
             runtime/dist/bootstrap-aarch64.zip \
             --manifest runtime/dist/bootstrap-manifest.json
