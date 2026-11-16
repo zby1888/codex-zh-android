@@ -1,5 +1,7 @@
 package io.github.zby1888.codexzh
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
@@ -23,6 +25,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -72,7 +75,9 @@ internal data class CodexChatEntry(
     val title: String,
     val text: String,
     val isUser: Boolean = false,
-    val isActivity: Boolean = false
+    val isActivity: Boolean = false,
+    val turnId: String? = null,
+    val canEdit: Boolean = false
 )
 
 internal data class CodexModelOption(
@@ -297,11 +302,39 @@ internal class CodexChatUiState {
         if (index >= 0) entries[index] = next else entries.add(next)
     }
 
-    fun upsert(id: String, title: String, text: String, isActivity: Boolean = false) {
+    fun bindEntryToTurn(id: String, turnId: String, canEdit: Boolean) {
+        val index = entries.indexOfFirst { it.id == id }
+        if (index >= 0) {
+            entries[index] = entries[index].copy(turnId = turnId, canEdit = canEdit)
+        }
+    }
+
+    fun upsert(
+        id: String,
+        title: String,
+        text: String,
+        isActivity: Boolean = false,
+        turnId: String? = null,
+        canEdit: Boolean? = null
+    ) {
         if (isActivity && text.isBlank()) return
         val index = entries.indexOfFirst { it.id == id }
-        val next = if (index < 0) CodexChatEntry(id, title, text, isActivity = isActivity)
-        else entries[index].copy(title = title, text = text, isActivity = isActivity)
+        val next = if (index < 0) {
+            CodexChatEntry(
+                id, title, text,
+                isActivity = isActivity,
+                turnId = turnId,
+                canEdit = canEdit ?: false
+            )
+        } else {
+            entries[index].copy(
+                title = title,
+                text = text,
+                isActivity = isActivity,
+                turnId = turnId ?: entries[index].turnId,
+                canEdit = canEdit ?: entries[index].canEdit
+            )
+        }
         if (index < 0) entries.add(next) else entries[index] = next
     }
 
@@ -376,14 +409,27 @@ internal class CodexChatUiState {
     fun restoreHistory(response: JSONObject) {
         entries.clear()
         val data = response.optJSONArray("data") ?: return
+        val userMessagesPerTurn = mutableMapOf<String, Int>()
+        for (index in 0 until data.length()) {
+            val entry = data.optJSONObject(index) ?: continue
+            val item = entry.optJSONObject("item") ?: continue
+            if (item.optString("type") == "userMessage") {
+                val turnId = entry.optString("turnId").takeIf { it.isNotBlank() }
+                if (turnId != null) userMessagesPerTurn[turnId] = (userMessagesPerTurn[turnId] ?: 0) + 1
+            }
+        }
         for (index in 0 until data.length()) {
             val entry = data.optJSONObject(index) ?: continue
             val item = entry.optJSONObject("item") ?: continue
             val id = item.optString("id")
             if (id.isBlank()) continue
+            val itemTurnId = entry.optString("turnId").takeIf { it.isNotBlank() }
             when (item.optString("type")) {
                 "userMessage" -> {
                     val content = item.optJSONArray("content") ?: continue
+                    val isPlainTextOnly = (0 until content.length()).all { contentIndex ->
+                        content.optJSONObject(contentIndex)?.optString("type") == "text"
+                    }
                     val text = buildList {
                         for (contentIndex in 0 until content.length()) {
                             val part = content.optJSONObject(contentIndex) ?: continue
@@ -395,11 +441,20 @@ internal class CodexChatUiState {
                             }
                         }
                     }.filter { it.isNotBlank() }.joinToString("\n")
-                    if (text.isNotBlank()) upsert("history:user:$id", "你", text)
+                    if (text.isNotBlank()) {
+                        upsert(
+                            "history:user:$id", "你", text,
+                            turnId = itemTurnId,
+                            canEdit = isPlainTextOnly && itemTurnId != null &&
+                                userMessagesPerTurn[itemTurnId] == 1
+                        )
+                    }
                 }
                 "agentMessage" -> {
                     val text = item.optString("text")
-                    if (text.isNotBlank()) upsert("history:assistant:$id", "Codex", text)
+                    if (text.isNotBlank()) {
+                        upsert("history:assistant:$id", "Codex", text, turnId = itemTurnId)
+                    }
                 }
                 "commandExecution" -> {
                     val text = buildString {
@@ -409,7 +464,7 @@ internal class CodexChatUiState {
                         val output = item.optString("aggregatedOutput")
                         if (output.isNotBlank()) append("\n\n").append(output)
                     }
-                    upsert("history:command:$id", "命令执行", text, true)
+                    upsert("history:command:$id", "命令执行", text, true, turnId = itemTurnId)
                 }
                 "fileChange" -> {
                     val changes = item.optJSONArray("changes")
@@ -421,24 +476,26 @@ internal class CodexChatUiState {
                             }
                         }
                     }.filter { it.isNotBlank() }
-                    upsert("history:file:$id", "文件修改", paths.joinToString("\n"), true)
+                    upsert("history:file:$id", "文件修改", paths.joinToString("\n"), true, turnId = itemTurnId)
                 }
                 "mcpToolCall" -> upsert(
                     "history:mcp:$id",
                     "MCP 工具",
                     "${item.optString("server")} / ${item.optString("tool")}\n状态：${item.optString("status")}",
-                    true
+                    true,
+                    turnId = itemTurnId
                 )
-                "plan" -> upsert("history:plan:$id", "执行计划", item.optString("text"), true)
+                "plan" -> upsert("history:plan:$id", "执行计划", item.optString("text"), true, turnId = itemTurnId)
             }
         }
     }
 
     fun appendCompletedTurnItems(turn: JSONObject) {
         val items = turn.optJSONArray("items") ?: return
+        val turnId = turn.optString("id").takeIf { it.isNotBlank() }
         for (index in 0 until items.length()) {
             val item = items.optJSONObject(index) ?: continue
-            handleItem(item, started = false)
+            handleItem(item, started = false, turnId = turnId)
         }
     }
 
@@ -471,7 +528,8 @@ internal class CodexChatUiState {
         for (index in 0 until data.length()) {
             val entry = data.optJSONObject(index) ?: continue
             val item = entry.optJSONObject("item") ?: continue
-            handleItem(item, started = false)
+            val turnId = entry.optString("turnId").takeIf { it.isNotBlank() }
+            handleItem(item, started = false, turnId = turnId)
         }
     }
 
@@ -613,14 +671,20 @@ internal class CodexChatUiState {
         }
     }
 
-    private fun handleItem(item: JSONObject?, started: Boolean) {
+    private fun handleItem(
+        item: JSONObject?,
+        started: Boolean,
+        turnId: String? = activeTurnId
+    ) {
         if (item == null) return
         val id = item.optString("id")
         if (id.isBlank()) return
         when (item.optString("type")) {
             "agentMessage" -> {
                 val text = item.optString("text")
-                if (text.isNotBlank()) upsert("assistant:$id", "Codex", text)
+                if (text.isNotBlank()) {
+                    upsert("assistant:$id", "Codex", text, turnId = turnId)
+                }
             }
             "commandExecution" -> {
                 val command = item.optString("command")
@@ -705,6 +769,22 @@ internal fun CodexChatScreen(
     val runtimeManager = remember(context) { RuntimeManager(context) }
     val providerRepository = remember(context) { ProviderRepository(context) }
     var prompt by remember { mutableStateOf("") }
+    var editingEntry by remember { mutableStateOf<CodexChatEntry?>(null) }
+    val clipboardManager = remember(context) {
+        context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    }
+    fun copyChatEntry(entry: CodexChatEntry) {
+        clipboardManager.setPrimaryClip(ClipData.newPlainText(entry.title, entry.text))
+        state.status = "已复制到剪贴板"
+    }
+    fun beginEditing(entry: CodexChatEntry) {
+        if (!entry.isUser || !entry.canEdit || entry.turnId.isNullOrBlank() ||
+            state.threadId == null || state.isWorking || state.isSubmitting
+        ) return
+        editingEntry = entry
+        prompt = entry.text
+        state.status = "已载入历史消息；发送后会从该消息之前创建新分支"
+    }
     var enterSendsMessage by remember(context) {
         mutableStateOf(
             context.getSharedPreferences("codex_chat_ui", Context.MODE_PRIVATE)
@@ -1255,9 +1335,10 @@ internal fun CodexChatScreen(
             state.isSubmitting = true
             state.error = null
             state.status = "正在连接 Codex 并提交消息…"
+            val userEntryId = "user:${System.nanoTime()}"
             state.entries.add(
                 CodexChatEntry(
-                    id = "user:${System.nanoTime()}",
+                    id = userEntryId,
                     title = "你",
                     text = text,
                     isUser = true
@@ -1283,6 +1364,7 @@ internal fun CodexChatScreen(
                     withContext(Dispatchers.IO) {
                         agent.steerTurn(threadId, activeTurn, text)
                     }
+                    state.bindEntryToTurn(userEntryId, activeTurn, canEdit = false)
                     state.status = "补充指令已发送，正在等待 Codex 处理"
                 } else {
                     val cwd = state.workingDirectory ?: defaultWorkspace(runtimeManager.paths.home)
@@ -1297,6 +1379,7 @@ internal fun CodexChatScreen(
                         )
                     }
                     if (state.isWorking) state.activeTurnId = turn.id
+                    state.bindEntryToTurn(userEntryId, turn.id, canEdit = true)
                     state.status = "消息已提交，正在等待 Codex 回复"
                     monitorTurn(agent, threadId, turn.id)
 
@@ -1312,12 +1395,172 @@ internal fun CodexChatScreen(
         }
     }
 
+    fun editAndResend(text: String, edited: CodexChatEntry) {
+        if (text.isBlank() || edited.turnId.isNullOrBlank() || state.isWorking || state.isSubmitting) return
+        val sourceThreadId = state.threadId ?: return
+        val targetTurnId = edited.turnId
+        scope.launch {
+            state.isSubmitting = true
+            state.error = null
+            state.status = "正在定位原消息，并准备独立分支…"
+            try {
+                val agent = ensureAgent()
+                val turns = mutableListOf<JSONObject>()
+                var cursor: String? = null
+                var allTurnsLoaded = false
+                var pageCount = 0
+                while (pageCount < 50) {
+                    val page = withContext(Dispatchers.IO) {
+                        agent.listTurns(
+                            sourceThreadId,
+                            cursor = cursor,
+                            limit = 200,
+                            sortDirection = "asc"
+                        )
+                    }
+                    val data = page.optJSONArray("data")
+                    if (data != null) {
+                        for (index in 0 until data.length()) {
+                            data.optJSONObject(index)?.let(turns::add)
+                        }
+                    }
+                    val nextCursor = page.optString("nextCursor")
+                        .takeIf { it.isNotBlank() && it != "null" }
+                    if (nextCursor == null) {
+                        allTurnsLoaded = true
+                        break
+                    }
+                    cursor = nextCursor
+                    pageCount++
+                }
+                check(allTurnsLoaded) {
+                    "会话历史过长，无法完整定位要编辑的消息；原会话没有被修改。"
+                }
+
+                val targetIndex = turns.indexOfFirst { it.optString("id") == targetTurnId }
+                check(targetIndex >= 0) {
+                    "找不到这条消息所属的轮次；原会话没有被修改，请刷新历史记录后重试。"
+                }
+                val previousTurnId = turns.getOrNull(targetIndex - 1)
+                    ?.optString("id")
+                    ?.takeIf { it.isNotBlank() }
+                val cwd = state.workingDirectory ?: defaultWorkspace(runtimeManager.paths.home)
+
+                val branch = if (previousTurnId != null) {
+                    withContext(Dispatchers.IO) {
+                        agent.forkThread(sourceThreadId, previousTurnId)
+                    }
+                } else {
+                    // Editing the first user turn has no preceding turn to fork from.
+                    // Start a new thread and keep the original first-turn conversation intact.
+                    withContext(Dispatchers.IO) {
+                        agent.startThread(cwd, model = state.selectedModelId)
+                    }
+                }
+
+                val branchHistory = if (previousTurnId != null) {
+                    withContext(Dispatchers.IO) {
+                        val allItems = JSONArray()
+                        var itemCursor: String? = null
+                        var allItemsLoaded = false
+                        var itemPageCount = 0
+                        while (itemPageCount < 50) {
+                            val page = agent.listItems(
+                                branch.id,
+                                cursor = itemCursor,
+                                limit = 200,
+                                sortDirection = "asc"
+                            )
+                            val pageData = page.optJSONArray("data")
+                            if (pageData != null) {
+                                for (index in 0 until pageData.length()) {
+                                    pageData.optJSONObject(index)?.let(allItems::put)
+                                }
+                            }
+                            val nextCursor = page.optString("nextCursor")
+                                .takeIf { it.isNotBlank() && it != "null" }
+                            if (nextCursor == null) {
+                                allItemsLoaded = true
+                                break
+                            }
+                            itemCursor = nextCursor
+                            itemPageCount++
+                        }
+                        check(allItemsLoaded) {
+                            "分支历史记录过长，无法完整恢复；原会话没有被修改。"
+                        }
+                        JSONObject().put("data", allItems)
+                    }
+                } else {
+                    JSONObject().put("data", JSONArray())
+                }
+
+                state.threadId = branch.id
+                state.workingDirectory = cwd
+                state.activeTurnId = null
+                state.isWorking = false
+                state.pendingApproval = null
+                state.pendingUserInput = null
+                state.userInputAnswers.clear()
+                state.showRecentThreads = false
+                state.restoreHistory(branchHistory)
+                // Once the fork exists, a retry after a send failure must continue on
+                // this new branch as a normal draft, not attempt to fork the old turn again.
+                editingEntry = null
+
+                val replacementEntryId = "user:${System.nanoTime()}"
+                state.entries.add(
+                    CodexChatEntry(
+                        id = replacementEntryId,
+                        title = "你",
+                        text = text,
+                        isUser = true
+                    )
+                )
+                state.isWorking = true
+                state.status = "已创建新分支，正在重新发送修改后的消息…"
+                val turn = withContext(Dispatchers.IO) {
+                    agent.startTurn(
+                        branch.id,
+                        text,
+                        cwd,
+                        model = state.selectedModelId,
+                        effort = state.selectedReasoningEffort
+                    )
+                }
+                state.bindEntryToTurn(replacementEntryId, turn.id, canEdit = true)
+                state.activeTurnId = turn.id
+                editingEntry = null
+                prompt = ""
+                state.status = "修改后的消息已发送；原会话仍保留在历史记录中"
+                runCatching {
+                    val recent = withContext(Dispatchers.IO) { agent.listThreads(limit = 30) }
+                    state.replaceRecentThreads(recent)
+                }
+                monitorTurn(agent, branch.id, turn.id)
+            } catch (error: Exception) {
+                state.isWorking = false
+                state.activeTurnId = null
+                state.error = error.message?.take(600) ?: "编辑并重发失败"
+                state.status = "编辑重发未完成；原会话不会被覆盖"
+                prompt = text
+            } finally {
+                state.isSubmitting = false
+            }
+        }
+    }
+
     fun submitPrompt() {
         val text = prompt.trim()
         if (text.isBlank() || state.isSubmitting) return
-        prompt = ""
         followLatestMessage = true
-        connectAndSend(text)
+        val selectedForEdit = editingEntry
+        if (selectedForEdit != null) {
+            editAndResend(text, selectedForEdit)
+        } else {
+            prompt = ""
+            connectAndSend(text)
+        }
     }
 
     fun submitUserInput() {
@@ -2083,7 +2326,8 @@ internal fun CodexChatScreen(
                     entry.isUser -> {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = androidx.compose.ui.Alignment.Bottom
                         ) {
                             Surface(
                                 modifier = Modifier.widthIn(max = 340.dp),
@@ -2091,12 +2335,20 @@ internal fun CodexChatScreen(
                                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                                 shape = RoundedCornerShape(20.dp)
                             ) {
-                                Text(
-                                    entry.text,
-                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
+                                SelectionContainer {
+                                    Text(
+                                        entry.text,
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
                             }
+                            ChatMessageActionMenu(
+                                onCopy = { copyChatEntry(entry) },
+                                onEditAndResend = if (entry.canEdit && !state.isWorking && !state.isSubmitting) {
+                                    { beginEditing(entry) }
+                                } else null
+                            )
                         }
                     }
                     entry.isActivity -> {
@@ -2142,6 +2394,9 @@ internal fun CodexChatScreen(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
+                                    ChatMessageActionMenu(
+                                        onCopy = { copyChatEntry(entry) }
+                                    )
                                     Text(
                                         if (expanded) "⌃" else "⌄",
                                         modifier = Modifier.padding(start = 6.dp),
@@ -2149,29 +2404,80 @@ internal fun CodexChatScreen(
                                     )
                                 }
                                 if (expanded) {
-                                    Text(
-                                        entry.text,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    SelectionContainer {
+                                        Text(
+                                            entry.text,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
                     else -> {
+                        val sourcePrompt = entry.turnId?.let { turnId ->
+                            state.entries.firstOrNull {
+                                it.isUser && it.turnId == turnId && it.canEdit
+                            }
+                        }
                         Column(
                             Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Text(
-                                entry.title.ifBlank { "Codex" },
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Text(entry.text, style = MaterialTheme.typography.bodyMedium)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    entry.title.ifBlank { "Codex" },
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                ChatMessageActionMenu(
+                                    onCopy = { copyChatEntry(entry) },
+                                    onRegenerate = if (sourcePrompt != null &&
+                                        !state.isWorking && !state.isSubmitting
+                                    ) {
+                                        { editAndResend(sourcePrompt.text, sourcePrompt) }
+                                    } else null
+                                )
+                            }
+                            SelectionContainer {
+                                Text(entry.text, style = MaterialTheme.typography.bodyMedium)
+                            }
                         }
                     }
+                }
+            }
+        }
+
+        editingEntry?.let { selected ->
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("正在编辑历史消息", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "发送后会从这条消息之前创建新分支，原会话不会被删除。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    TextButton(
+                        onClick = {
+                            editingEntry = null
+                            prompt = ""
+                        }
+                    ) { Text("取消") }
                 }
             }
         }
@@ -2218,7 +2524,13 @@ internal fun CodexChatScreen(
                                 strokeWidth = 2.dp
                             )
                         } else {
-                            Text(if (state.isWorking) "追加" else "发送")
+                            Text(
+                                when {
+                                    editingEntry != null -> "重发"
+                                    state.isWorking -> "追加"
+                                    else -> "发送"
+                                }
+                            )
                         }
                     }
                 }
@@ -2329,6 +2641,50 @@ internal fun CodexChatScreen(
             }
         }
     }
+    }
+}
+
+@Composable
+private fun ChatMessageActionMenu(
+    onCopy: () -> Unit,
+    onEditAndResend: (() -> Unit)? = null,
+    onRegenerate: (() -> Unit)? = null
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { expanded = true }) {
+            Text("⋯", style = MaterialTheme.typography.titleMedium)
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            DropdownMenuItem(
+                text = { Text("复制消息") },
+                onClick = {
+                    expanded = false
+                    onCopy()
+                }
+            )
+            if (onEditAndResend != null) {
+                DropdownMenuItem(
+                    text = { Text("编辑并重发") },
+                    onClick = {
+                        expanded = false
+                        onEditAndResend()
+                    }
+                )
+            }
+            if (onRegenerate != null) {
+                DropdownMenuItem(
+                    text = { Text("重新生成回答") },
+                    onClick = {
+                        expanded = false
+                        onRegenerate()
+                    }
+                )
+            }
+        }
     }
 }
 

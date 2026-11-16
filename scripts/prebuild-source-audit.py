@@ -118,6 +118,16 @@ if "if (isActivity && text.isBlank()) return" not in chat or '"未知操作"' in
     errors.append("CodexChatScreen.kt: empty/generic execution placeholders must not appear")
 if "val preview = lines.firstOrNull()" not in chat or ".clickable { expanded = !expanded }" not in chat:
     errors.append("CodexChatScreen.kt: execution details must be compact and expandable")
+if "ClipboardManager" not in chat or 'Text("复制消息")' not in chat:
+    errors.append("CodexChatScreen.kt: user, assistant and activity messages need a copy action")
+if "SelectionContainer" not in chat:
+    errors.append("CodexChatScreen.kt: message bodies must support native text selection")
+if "fun editAndResend(" not in chat or "agent.forkThread(sourceThreadId, previousTurnId)" not in chat:
+    errors.append("CodexChatScreen.kt: edit-and-resend must fork before the selected turn instead of appending to the source thread")
+if 'Text("编辑并重发")' not in chat or "val turnId: String? = null" not in chat:
+    errors.append("CodexChatScreen.kt: editable historical user messages need a visible action and stable turn metadata")
+if "isPlainTextOnly" not in chat or "userMessagesPerTurn[itemTurnId] == 1" not in chat:
+    errors.append("CodexChatScreen.kt: editing must be disabled for attachments and multiple user prompts sharing a turn")
 
 if errors:
     print("PREBUILD SOURCE AUDIT FAILED")
