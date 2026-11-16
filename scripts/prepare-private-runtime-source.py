@@ -175,7 +175,7 @@ def main() -> None:
     bootstrap = replace_once(
         bootstrap,
         'mv -f "${BOOTSTRAP_TMPDIR}/bootstrap-${1}.zip" "$TERMUX_PACKAGES_DIRECTORY/"',
-        'mkdir -p "$TERMUX_PACKAGES_DIRECTORY/bootstrap-dist"\n\tmv -f "${BOOTSTRAP_TMPDIR}/bootstrap-${1}.zip" "$TERMUX_PACKAGES_DIRECTORY/bootstrap-dist/" || return $?',
+        'mkdir -p "${TERMUX_BUILT_DEBS_DIRECTORY}/bootstrap-dist"\n\tmv -f "${BOOTSTRAP_TMPDIR}/bootstrap-${1}.zip" "${TERMUX_BUILT_DEBS_DIRECTORY}/bootstrap-dist/" || return $?',
         "write bootstrap archive to a separate distribution directory",
     )
     bootstrap_path.write_text(bootstrap, encoding="utf-8")
