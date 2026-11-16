@@ -9,11 +9,6 @@ on:
       - "scripts/prepare-private-runtime-source.py"
       - "scripts/validate-private-runtime-bootstrap.py"
       - "scripts/validate-source-locks.py"
-      - "app/src/main/java/io/github/zby1888/codexzh/RuntimePaths.kt"
-      - "app/src/main/java/io/github/zby1888/codexzh/RuntimeManager.kt"
-      - "app/src/main/java/io/github/zby1888/codexzh/CodexAppServerClient.kt"
-      - "app/src/main/java/io/github/zby1888/codexzh/PtyTerminalSession.kt"
-      - ".github/workflows/build-private-runtime.yml"
   # Documentation-only edits under runtime/ do not start the multi-hour ARM64 build.
   pull_request:
     branches: [main]
@@ -23,17 +18,12 @@ on:
       - "scripts/prepare-private-runtime-source.py"
       - "scripts/validate-private-runtime-bootstrap.py"
       - "scripts/validate-source-locks.py"
-      - "app/src/main/java/io/github/zby1888/codexzh/RuntimePaths.kt"
-      - "app/src/main/java/io/github/zby1888/codexzh/RuntimeManager.kt"
-      - "app/src/main/java/io/github/zby1888/codexzh/CodexAppServerClient.kt"
-      - "app/src/main/java/io/github/zby1888/codexzh/PtyTerminalSession.kt"
-      - ".github/workflows/build-private-runtime.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Runtime builds are triggered only by runtime/launcher/native-PTY source paths.
+# Expensive package builds are triggered only by pinned runtime inputs and build scripts. UI/Android code uses the cached bootstrap in ci.yml.
 # A newer relevant source commit supersedes the older build and frees the runner.
 concurrency:
   group: private-runtime-arm64-${{ github.ref }}
@@ -57,6 +47,8 @@ jobs:
 
       - name: Configure custom application prefix
         run: |
+          python3 scripts/prebuild-source-audit.py
+          python3 scripts/validate-source-locks.py
           python3 -m py_compile scripts/prepare-private-runtime-source.py scripts/validate-private-runtime-bootstrap.py
           python3 scripts/prepare-private-runtime-source.py vendor/termux-packages
           bash -n vendor/termux-packages/scripts/run-docker.sh

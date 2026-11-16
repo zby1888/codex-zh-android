@@ -401,6 +401,10 @@ internal class CodexChatUiState {
 
     fun applyNotification(message: JSONObject) {
         activityRevision += 1
+        if (error?.startsWith("消息已提交，但连续 60 秒") == true) {
+            error = null
+            status = "Codex 已恢复活动"
+        }
         val method = message.optString("method")
         val params = message.optJSONObject("params") ?: JSONObject()
         when (method) {
@@ -2084,7 +2088,6 @@ internal fun CodexChatScreen(
                     }
                 }
             }
-        }
         }
     }
     }

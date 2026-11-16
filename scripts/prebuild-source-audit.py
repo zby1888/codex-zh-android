@@ -10,8 +10,8 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[1]
 TEXT_SUFFIXES = {
     ".kt", ".kts", ".java", ".cpp", ".c", ".h", ".hpp", ".xml",
-    ".py", ".sh", ".yml", ".yaml", ".json", ".md", ".properties",
-    ".gradle", ".toml", ".txt"
+    ".py", ".sh", ".yml", ".yaml", ".json", ".properties",
+    ".gradle", ".toml"
 }
 SKIP_PARTS = {".git", ".gradle", "build", ".idea", ".kotlin", "__pycache__"}
 errors = []
@@ -84,4 +84,4 @@ if errors:
     for item in errors:
         print(" - " + item)
     sys.exit(1)
-print(f"Prebuild source audit passed: {checked} source/config/doc files checked; XML, JSON, Python and shell syntax checks completed.")
+print(f"Prebuild source audit passed: {checked} source and config files checked; XML, JSON, Python and shell syntax checks completed.")

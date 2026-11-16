@@ -118,10 +118,14 @@ if "CrashLogScreen(Modifier.padding(padding))" not in main_activity or "导出�
     raise SystemExit("Crash logs must be visible and exportable inside the app")
 if "androidx.core.content.FileProvider" not in manifest or "@xml/crash_log_paths" not in manifest:
     raise SystemExit("Crash-log export must use a scoped FileProvider")
-runtime_workflow = (path.parent.parent / ".github" / "workflows" / "build-private-runtime.yml").read_text(encoding="utf-8")
-for diagnostic_path in ("CrashLogManager.kt", "CrashLogScreen.kt", "crash_log_paths.xml"):
-    if diagnostic_path not in runtime_workflow:
-        raise SystemExit(f"Full APK workflow must be triggered by diagnostics file changes: {diagnostic_path}")
+ui_workflow = (path.parent.parent / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+for required in (
+    "scripts/prebuild-source-audit.py",
+    "python3 scripts/validate-source-locks.py",
+    "codex-zh-android-debug-with-runtime",
+):
+    if required not in ui_workflow:
+        raise SystemExit(f"Android UI workflow is missing required full-build validation/packaging behavior: {required}")
 
 target_sdk = re.search(r"targetSdk\s*=\s*(\d+)", app_gradle)
 if target_sdk and int(target_sdk.group(1)) >= 29:
