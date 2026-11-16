@@ -63,6 +63,15 @@ if "vendor/termux-packages/output/bootstrap-dist/bootstrap-aarch64.zip" not in r
     raise SystemExit("Runtime workflow must collect the bootstrap from the Termux output directory")
 if "test -w /home/builder/termux-packages/output/bootstrap-dist" not in runtime_workflow:
     raise SystemExit("Runtime workflow must preflight the bootstrap output directory inside the builder")
+
+prepare_script = (path.parent / "prepare-private-runtime-source.py").read_text(encoding="utf-8")
+runtime_workflow = (path.parent.parent / ".github" / "workflows" / "build-private-runtime.yml").read_text(encoding="utf-8")
+if '"${TERMUX_BUILT_DEBS_DIRECTORY}/bootstrap-dist/"' not in prepare_script:
+    raise SystemExit("Bootstrap archive must be written under the AppArmor-writable Termux output directory")
+if "vendor/termux-packages/output/bootstrap-dist/bootstrap-aarch64.zip" not in runtime_workflow:
+    raise SystemExit("Runtime workflow must collect the bootstrap from the Termux output directory")
+if "test -w /home/builder/termux-packages/output/bootstrap-dist" not in runtime_workflow:
+    raise SystemExit("Runtime workflow must preflight the bootstrap output directory inside the builder")
 for profile_name, packages in profiles.items():
     if len(packages) != len(set(packages)):
         raise SystemExit(f"Duplicate package in optional profile: {profile_name}")
