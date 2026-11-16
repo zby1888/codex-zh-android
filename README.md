@@ -1,8 +1,21 @@
 # Codex 中文版 Android
 
-独立 Android ARM64 Codex 中文客户端工程。目标是将 Codex 智能体、终端、通用聊天、模型服务商和 MCP 工具整合到一个不依赖 Termux 的应用中。
+独立 Android ARM64 Codex 中文客户端工程。目标不是简单套壳，而是**尽可能把 Codex CLI 的主要能力搬进 Android 原生图形界面**：由官方 Codex CLI 承担 Agent 执行，Android App 负责会话、项目、权限审批、工具、配置和结果展示；同时提供真正独立的交互式终端。
 
-> **当前状态：基础 ARM64 私有运行环境已构建，并已在 Android 14 / ARM64 实机验证安装成功。** APK 已内置离线 bootstrap，应用可以在自己的私有目录中安装基础 Bionic 工具链；这不代表完整 Codex 客户端已经完成。真正的 PTY 终端、Codex CLI 启动、Codex App Server 聊天、通用模型协议适配器和 MCP 执行器仍需继续集成。
+## 项目定位（长期约束）
+
+**请所有后续开发者、自动化 Agent 和 Codex CLI 在开始修改前先阅读 [AGENTS.md](AGENTS.md)、本节及 [架构约束](docs/ARCHITECTURE.md)。**
+
+- **Agent 核心**：优先使用固定版本的官方 Codex CLI 和经过版本核验的 App Server / JSON-RPC 接口。不能只解析 TUI 输出或把终端文字拼成聊天界面。
+- **Android 原生界面**：尽可能覆盖 CLI 的会话管理、历史记录、模型选择、推理设置、任务进度、命令执行、文件修改与 Diff、权限审批、代码审查、MCP、Skills 和配置管理。功能清单见 [CLI 功能对照表](docs/CLI-FEATURE-PARITY.md)。
+- **双执行通道**：Agent 使用独立 App Server 通道；终端使用真正的 PTY。二者共享应用私有项目目录和必要配置，但不能混用输入输出管道。
+- **可选 Root 调试**：客户端支持在用户主动申请并通过 Magisk / KernelSU 等系统 Root 管理器授权后，启动独立 Root 终端；Codex Agent 和普通终端不提权。主要面向代码编写、构建、授权范围内的应用分析和动态调试。
+- **独立运行环境**：APK 使用自己的 Android/Bionic ARM64 私有运行时、PREFIX、HOME 和 CODEX_HOME，不依赖或修改用户原有 Termux。
+- **第三方服务商**：Codex Agent 模式必须验证中转站对 Codex 所需 Responses API、流式事件和工具调用的兼容性；其他协议走独立通用聊天适配器，不得混为一谈。
+- **中文由 App 自己负责**：Android UI、提示、设置和错误说明均由本项目维护中文文案。汉化版 CLI 可以作为以后可选方案，但**绝不能成为 APK 主线构建的强制依赖**。
+- **诚实标记完成度**：UI 骨架、Runtime、CLI/App Server、完整 APK 和实机功能测试分开验收；没有通过的能力标记为未实现或待验证，不能仅凭 UI 构建成功宣称完成。
+
+> **当前状态（开发分支）：** Android UI 骨架已多次通过 Debug APK 编译；Codex App Server 聊天接线已包含会话创建/恢复、模型和推理强度、流式消息、命令输出、Diff、基础审批和交互式提问。会话列表、分支/重命名/归档/删除、私有项目工作区、目标/预算、上下文压缩和未提交改动审查入口也已写入界面。MCP 页面已有服务状态、STDIO / Streamable HTTP 配置、OAuth 入口和 Keystore 凭据注入；Bearer Token 与自定义 HTTP Header 表单已在 UI-only Build #103 通过 Kotlin 编译、APK 组装和上传验证。**这些 UI 构建不包含完整 ARM64 Runtime，也不代表 Agent、MCP 或第三方中转站已经真机端到端可用。** 真正 PTY 已有首版 NDK / JNI 主从设备、私有 Bash、libvterm 状态解析和 Compose 字符网格渲染；单会话、滚动缓冲、多标签、完整 IME 与真机交互仍待完善。Root 授权探测和独立 Root PTY 启动入口也已接线，但 Magisk / KernelSU 真机兼容性、进程组退出清理及 SELinux 行为尚未验收；Codex Agent 尚未接入 Root 工具调用。详见 [PTY 设计](docs/TERMINAL-PTY-ARCHITECTURE.md) 和 [Root / 逆向动态调试设计](docs/ROOT-DEBUGGING-ARCHITECTURE.md)。
 
 - 应用名：Codex 中文版
 - Android applicationId：`com.codex.zhou`
@@ -10,6 +23,16 @@
 - 最低 Android：API 24；优先测试 Android 14
 - 技术栈：Kotlin + Jetpack Compose
 - 私有目录：独立 `PREFIX`、`HOME`、`CODEX_HOME`，不访问 Termux 私有目录，不覆盖原有 `~/.codex`
+
+## 开源项目参考
+
+除 Codex 官方 CLI / App Server 外，开发时明确参考以下开源项目的成熟设计：
+
+- **OpenCode**（[anomalyco/opencode](https://github.com/anomalyco/opencode)）：参考会话生命周期与历史、事件驱动的消息/工具状态、Agent 与子 Agent、权限策略、MCP、Skills、自定义命令、项目工作区和 Git worktree 等设计。执行协议仍以本项目锁定版本的 Codex App Server 为准，不直接把 OpenCode runtime 当成 Codex runtime。
+- **Operit**（[AAswordman/Operit](https://github.com/AAswordman/Operit)）：参考 Android 优先的 Agent 工作台、任务进度、附件与工作区上下文、工具执行卡片、Android 文件/终端/浏览器能力、工作流、ToolPkg、MCP 和 Skills 管理。只借鉴适合本项目的交互与模块设计，不把 Operit 的 Agent 执行引擎替换 Codex。
+- **RikkaHub**：参考多服务商、多模型、自定义端点和请求头、配置管理及 MCP 入口；具体实现以核验后的上游版本和许可证为准。
+
+参考项目是设计和交互参考，不代表可以直接复制代码。任何代码、资源、协议适配或文案移植前，必须检查许可证、依赖许可证、来源和兼容性，并保留必要的版权声明。
 
 ## 构建 UI 骨架
 
@@ -25,14 +48,23 @@ GitHub Actions 会构建 Debug APK 并上传为 Actions Artifact。
 
 - [产品需求](docs/PRODUCT-REQUIREMENTS.md)
 - [架构](docs/ARCHITECTURE.md)
+- [Codex App Server 接入设计](docs/APP-SERVER-INTEGRATION.md)
 - [模型服务商](docs/PROVIDER-PROTOCOLS.md)
 - [MCP](docs/MCP-CONFIG.md)
+- [Codex CLI 功能对照表](docs/CLI-FEATURE-PARITY.md)
+- [PTY 终端架构与许可证门槛](docs/TERMINAL-PTY-ARCHITECTURE.md)
+- [Root 权限与逆向 / 动态调试架构](docs/ROOT-DEBUGGING-ARCHITECTURE.md)
 - [安全设计](docs/SECURITY.md)
 
 ## 原则
 
 1. 保留现有 Termux、原版 Codex、旧版汉化 Codex 和用户数据。
-2. 不要求 Root；默认不启动本地网络监听。
+2. 基础功能不要求 Root；Root 调试通道默认关闭、逐次授权；默认不启动本地网络监听。
 3. API 密钥不得写入日志或提交到仓库。
 4. 工具调用和有副作用的操作默认需要用户审批。
 5. 移植第三方代码、文案或资源前必须审查许可证。
+
+
+## Android UI / UX 设计方向
+
+聊天主界面借鉴 ChatGPT 移动端成熟的交互规律：简洁会话侧栏、聊天内容优先、输入区集中附件和工具入口、流式过程清楚易读。项目、命令执行、文件 Diff、MCP 和审批仍按 Codex 的实际能力做成原生结构化界面。完整设计与实施顺序见 [Android UI / UX 设计规范](docs/ANDROID-UI-UX-DESIGN.md)。只借鉴交互思路，不复制 ChatGPT 品牌资源、专有图标或文案。

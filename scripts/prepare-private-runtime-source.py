@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -20,64 +18,11 @@ def replace_once(content: str, old: str, new: str, label: str) -> str:
     return content.replace(old, new, 1)
 
 
-def locked_ref(name: str) -> str:
-    lock = (ROOT / "runtime/sources.lock.yml").read_text(encoding="utf-8")
-    entries = re.findall(r"(?ms)^  - name: ([^\n]+)\n(.*?)(?=^  - name: |\Z)", lock)
-    for source_name, body in entries:
-        if source_name.strip() == name:
-            match = re.search(r"(?m)^    ref: ([^\n]+)$", body)
-            if match:
-                return match.group(1).strip().strip("'\"")
-    raise SystemExit(f"Missing pinned source ref in sources.lock.yml: {name}")
-
-
-def stage_codex_localization(termux_source: Path, localization_source: Path) -> None:
-    package_dir = termux_source / "packages/codex"
-    recipe_path = package_dir / "build.sh"
-    if not recipe_path.is_file():
-        raise SystemExit(f"Missing pinned Termux Codex package recipe: {recipe_path}")
-    recipe = recipe_path.read_text(encoding="utf-8")
-    expected_version = CONFIG["codexVersion"]
-    if f'TERMUX_PKG_VERSION="{expected_version}"' not in recipe:
-        raise SystemExit(f"Termux Codex recipe does not match Codex {expected_version}")
-    for required in ('-p codex-cli', '--bin codex', '-p codex-code-mode-host', '--bin codex-code-mode-host'):
-        if required not in recipe:
-            raise SystemExit(f"Termux Codex recipe missing target: {required}")
-
-    expected_ref = locked_ref("codex-zh-localization")
-    actual_ref = subprocess.run(
-        ["git", "-C", str(localization_source), "rev-parse", "HEAD"],
-        check=True, capture_output=True, text=True
-    ).stdout.strip()
-    if actual_ref != expected_ref:
-        raise SystemExit(f"Localization checkout mismatch: expected {expected_ref}, got {actual_ref}")
-
-    patch_dir = localization_source / "native/patches/codex"
-    patches = sorted(patch_dir.glob("*.patch"))
-    expected_count = int(CONFIG["codexLocalizationPatchCount"])
-    if len(patches) != expected_count:
-        raise SystemExit(f"Expected {expected_count} localization patches, found {len(patches)}")
-    for index, patch in enumerate(patches, start=1):
-        if not re.match(rf"^{index:04d}-.*\.patch$", patch.name):
-            raise SystemExit(f"Unexpected localization patch order/name: {patch.name}")
-        content = patch.read_text(encoding="utf-8")
-        if "--- a/codex-rs/" not in content or "+++ b/codex-rs/" not in content:
-            raise SystemExit(f"Patch does not target Codex source: {patch.name}")
-
-    for stale in package_dir.glob("zzz-codex-zh-*.patch"):
-        stale.unlink()
-    for patch in patches:
-        shutil.copyfile(patch, package_dir / f"zzz-codex-zh-{patch.name}")
-    print(f"Pinned Chinese localization revision: {actual_ref}")
-    print(f"Staged {len(patches)} native Chinese patches into {package_dir}")
-
-
 def main() -> None:
-    if len(sys.argv) != 3:
-        raise SystemExit("usage: prepare-private-runtime-source.py <termux-packages-checkout> <codex-localization-checkout>")
+    if len(sys.argv) != 2:
+        raise SystemExit("usage: prepare-private-runtime-source.py <termux-packages-checkout>")
 
     source = Path(sys.argv[1]).resolve()
-    localization_source = Path(sys.argv[2]).resolve()
     # APR-util 1.6.5 is an archived Apache release. The pinned Termux
     # recipe still points at downloads.apache.org, which no longer serves this
     # old tarball after newer APR-util releases are published. Keep the pinned
@@ -114,14 +59,61 @@ def main() -> None:
         raise SystemExit("Pinned APR-util SHA-256 changed unexpectedly; review the recipe before building")
     apr_util_path.write_text(apr_util, encoding="utf-8")
 
-    stage_codex_localization(source, localization_source)
+    # The Android client provides its own native Git UI. Git's optional
+    # gitk/git-gui, git-svn and git-p4 integrations are not part of this
+    # runtime: they pull Tcl/Tk + X11, Perl/Subversion and Python toolchains
+    # into an otherwise small ARM64 CLI environment. Keep core Git and HTTPS.
+    git_recipe_path = source / "packages/git/build.sh"
+    if not git_recipe_path.is_file():
+        raise SystemExit(f"Missing pinned Git recipe: {git_recipe_path}")
+    git_recipe = git_recipe_path.read_text(encoding="utf-8")
+    git_recipe = replace_once(
+        git_recipe,
+        "--with-tcltk=$TERMUX_PREFIX/bin/wish\n",
+        "",
+        "omit optional Git GUI/Tcl-Tk configure dependency",
+    )
+    git_recipe = replace_once(
+        git_recipe,
+        "NO_GETTEXT=1\n",
+        "NO_GETTEXT=1\nNO_TCLTK=1\nNO_PERL=1\nNO_PYTHON=1\n",
+        "disable optional Git GUI, Perl and Python integrations",
+    )
+    if "--with-tcltk=" in git_recipe or any(
+        flag not in git_recipe
+        for flag in ("NO_TCLTK=1", "NO_PERL=1", "NO_PYTHON=1")
+    ):
+        raise SystemExit("Pinned Git recipe still enables optional GUI/Perl/Python integrations")
+    git_recipe_path.write_text(git_recipe, encoding="utf-8")
 
     properties_path = source / "scripts/properties.sh"
     bootstrap_path = source / "scripts/build-bootstraps.sh"
     docker_runner_path = source / "scripts/run-docker.sh"
+    dockerfile_path = source / "scripts/Dockerfile"
 
-    if not properties_path.is_file() or not bootstrap_path.is_file() or not docker_runner_path.is_file():
+    if not all(path.is_file() for path in (
+        properties_path, bootstrap_path, docker_runner_path, dockerfile_path
+    )):
         raise SystemExit(f"Not a supported termux-packages checkout: {source}")
+
+    # Refuse package names that do not exist at the pinned Termux commit.
+    all_profiles = {"base": CONFIG["packages"], **CONFIG.get("optionalPackageProfiles", {})}
+    base_packages = set(CONFIG["packages"])
+    if len(CONFIG["packages"]) != len(base_packages):
+        raise SystemExit("Duplicate package in the base runtime profile")
+    for profile_name, profile_packages in all_profiles.items():
+        if len(profile_packages) != len(set(profile_packages)):
+            raise SystemExit(f"Duplicate package in runtime profile: {profile_name}")
+        if profile_name != "base" and base_packages.intersection(profile_packages):
+            raise SystemExit(f"Optional profile {profile_name} repeats base packages")
+        for package_name in profile_packages:
+            if not re.fullmatch(r"[a-z0-9][a-z0-9+.-]*", package_name):
+                raise SystemExit(f"Invalid Termux package name in {profile_name}: {package_name}")
+            if not (source / "packages" / package_name / "build.sh").is_file():
+                raise SystemExit(
+                    f"Package recipe not found at the pinned Termux commit: "
+                    f"{profile_name}/{package_name}"
+                )
 
     properties = properties_path.read_text(encoding="utf-8")
     properties = replace_once(
@@ -172,15 +164,39 @@ def main() -> None:
         + "\n"
     )
     bootstrap = bootstrap[:start] + replacement + bootstrap[end:]
+    bootstrap = replace_once(
+        bootstrap,
+        '\techo $\'\\n\\n\\n\'"[*] Adding termux bootstrap second stage files..."\n',
+        '\techo $\'\\n\\n\\n\'"[*] Adding termux bootstrap second stage files..."\n\n\tmkdir -p "${BOOTSTRAP_ROOTFS}/${TERMUX__PREFIX__PROFILE_D_DIR}"\n',
+        "create the profile.d directory before writing the fallback script",
+    )
     # Write the generated archive into output/, which is already writable for
     # package artifacts under the Termux builder's restricted container profile.
     bootstrap = replace_once(
         bootstrap,
         'mv -f "${BOOTSTRAP_TMPDIR}/bootstrap-${1}.zip" "$TERMUX_PACKAGES_DIRECTORY/"',
-        'mv -f "${BOOTSTRAP_TMPDIR}/bootstrap-${1}.zip" "$TERMUX_BUILT_DEBS_DIRECTORY/" || return $?',
-        "write bootstrap archive into the writable package output directory",
+        'mkdir -p "${TERMUX_BUILT_DEBS_DIRECTORY}/bootstrap-dist"\n\tmv -f "${BOOTSTRAP_TMPDIR}/bootstrap-${1}.zip" "${TERMUX_BUILT_DEBS_DIRECTORY}/bootstrap-dist/" || return $?',
+        "write bootstrap archive to a separate distribution directory",
     )
     bootstrap_path.write_text(bootstrap, encoding="utf-8")
+
+
+    # Remove an unconditional host apt upgrade; the Ubuntu base and package
+    # setup are pinned by the Dockerfile and this recipe.
+    dockerfile = dockerfile_path.read_text(encoding="utf-8")
+    dockerfile = replace_once(
+        dockerfile,
+        "\tapt-get -yq upgrade && " + chr(92) + "\n",
+        "",
+        "remove non-reproducible full host apt upgrade",
+    )
+    dockerfile = replace_once(
+        dockerfile,
+        "su - builder -c \"TERMUX_PKGS__BUILD__IS_DOCKER_BUILD='true' /tmp/termux-packages/scripts/setup-ubuntu.sh\"",
+        "su - builder -c \"TERMUX_PKGS__BUILD__IS_DOCKER_BUILD='true' /tmp/termux-packages/scripts/setup-ubuntu.sh\"",
+        "enable minimal host builder package set",
+    )
+    dockerfile_path.write_text(dockerfile, encoding="utf-8")
 
     # GitHub-hosted runners do not always expose AppArmor. Keep the upstream
     # seccomp profile and CAP_SYS_ADMIN/FUSE settings, but omit only the

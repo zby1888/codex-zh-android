@@ -4,17 +4,19 @@ on:
   push:
     branches: [main]
     paths:
-      - "runtime/**"
+      - "runtime/sources.lock.yml"
+      - "runtime/private-runtime-config.json"
       - "scripts/prepare-private-runtime-source.py"
       - "scripts/validate-private-runtime-bootstrap.py"
-      - "app/src/main/java/**"
-      - ".github/workflows/build-private-runtime.yml"
+  # Pull requests use a previously validated Runtime artifact from ci.yml.
+  # Dispatch this workflow manually to validate a proposed Runtime-source change before merging.
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Keep expensive ARM64 bootstrap builds serialized; a newer commit supersedes an older build.
+# Expensive package builds are triggered only by pinned runtime inputs and build scripts. UI/Android code uses the cached bootstrap in ci.yml.
+# A newer relevant source commit supersedes the older build and frees the runner.
 concurrency:
   group: private-runtime-arm64-${{ github.ref }}
   cancel-in-progress: true
@@ -35,17 +37,12 @@ jobs:
           ref: 1d8cc3f98c8a685f3a1475becbb0fe7d7dcda7fd
           path: vendor/termux-packages
 
-      - name: Checkout pinned Chinese Codex localization patches
-        uses: actions/checkout@v4
-        with:
-          repository: zby1888/codex-code-zh-cn
-          ref: 65a3e421cc67d9859b3eaecf26f859a806a9dded
-          path: vendor/codex-zh-cn
-
       - name: Configure custom application prefix
         run: |
-          python3 -m py_compile scripts/prepare-private-runtime-source.py
-          python3 scripts/prepare-private-runtime-source.py vendor/termux-packages vendor/codex-zh-cn
+          python3 scripts/prebuild-source-audit.py
+          python3 scripts/validate-source-locks.py
+          python3 -m py_compile scripts/prepare-private-runtime-source.py scripts/validate-private-runtime-bootstrap.py
+          python3 scripts/prepare-private-runtime-source.py vendor/termux-packages
           bash -n vendor/termux-packages/scripts/run-docker.sh
           bash -n vendor/termux-packages/scripts/build-bootstraps.sh
 
@@ -66,34 +63,48 @@ jobs:
           echo "===== Disk after cleanup ====="
           df -h
 
-      # run-docker.sh mounts this host directory into /home/builder/.termux-build.
-      # Reusing it preserves downloaded sources, Rust/Cargo data and completed package builds.
-      - name: Restore Termux ARM64 build cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.termux-build
-          key: termux-private-runtime-ubuntu24-aarch64-${{ hashFiles('runtime/sources.lock.yml', 'runtime/private-runtime-config.json', 'scripts/prepare-private-runtime-source.py', 'vendor/codex-zh-cn/native/patches/codex/*.patch') }}
-          restore-keys: |
-            termux-private-runtime-ubuntu24-aarch64-
-
-      - name: Prepare writable Termux build and prefix directories
+      - name: Ensure exact package cache directories exist
         run: |
-          mkdir -p "$HOME/.termux-build" "$HOME/.termux-build/prefix"
-          # The container's writable overlay is much smaller than the runner disk.
-          # Keep installed Termux packages on the persistent host-mounted build volume.
-          chmod 0777 "$HOME/.termux-build" "$HOME/.termux-build/prefix"
-          echo "===== Host disk after cache restore ====="
+          mkdir -p "$HOME/.termux-build" vendor/termux-packages/output/bootstrap-dist
+
+      # Exact cache only: package markers, prefix, sources, Rustup/Cargo and
+      # matching .debs must always come from the same package profile.
+      - name: Restore exact private ARM64 package cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.termux-build
+            vendor/termux-packages/output
+          key: termux-private-runtime-v3-${{ hashFiles('runtime/sources.lock.yml', 'runtime/private-runtime-config.json', 'scripts/prepare-private-runtime-source.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            termux-private-runtime-v3-${{ hashFiles('runtime/sources.lock.yml', 'runtime/private-runtime-config.json', 'scripts/prepare-private-runtime-source.py') }}-
+
+      - name: Prepare writable Termux state directories
+        run: |
+          mkdir -p "$HOME/.termux-build" "$HOME/.termux-build/prefix" \
+            "$HOME/.termux-build/.built-packages" "$HOME/.termux-build/cargo" \
+            "$HOME/.termux-build/rustup" vendor/termux-packages/output/bootstrap-dist
+          chmod 0777 "$HOME/.termux-build" "$HOME/.termux-build/prefix" \
+            "$HOME/.termux-build/.built-packages" "$HOME/.termux-build/cargo" \
+            "$HOME/.termux-build/rustup" vendor/termux-packages/output vendor/termux-packages/output/bootstrap-dist
+          echo "===== Host disk after exact cache restore ====="
           df -h "$HOME"
-          du -sh "$HOME/.termux-build" "$HOME/.termux-build/prefix" || true
+          echo "===== Cache sizes ====="
+          du -sh "$HOME/.termux-build" vendor/termux-packages/output || true
+          echo "===== Cached package marker count ====="
+          find "$HOME/.termux-build/.built-packages" -maxdepth 1 -type f | wc -l
 
-      - name: Pull pinned Ubuntu builder base image
-        run: docker pull ubuntu:26.04
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Build package-builder image from pinned source
+      - name: Build package-builder image with GitHub layer cache
         working-directory: vendor/termux-packages/scripts
-        env:
-          DOCKER_BUILDKIT: "1"
-        run: docker build --pull --progress=plain --file Dockerfile --tag codex-runtime-builder:${{ github.sha }} .
+        run: |
+          docker buildx build --pull --load --progress=plain \
+            --cache-from type=gha,scope=codex-termux-builder-v1 \
+            --cache-to type=gha,scope=codex-termux-builder-v1,mode=max \
+            --file Dockerfile --tag codex-runtime-builder:${{ github.sha }} .
+
 
       - name: Build ARM64 bootstrap from source
         working-directory: vendor/termux-packages
@@ -105,16 +116,70 @@ jobs:
           # /data: Termux creates /data/TERMUX_ARCH inside the container. The package
           # prefix is mounted separately to keep large installed binaries/libraries
           # out of Docker's limited writable overlay and persist them in Actions cache.
-          export TERMUX_DOCKER_RUN_EXTRA_ARGS="--volume $HOME/.termux-build:/home/builder/.termux-build --volume $HOME/.termux-build/prefix:/data/data/com.codex.zhou/files/runtime/prefix"
-          # The 7.7 GiB hosted runner killed rustc while compiling codex-tui.
-          # Build one package at a time and disable Thin LTO to lower peak RAM.
-          ./scripts/run-docker.sh bash -c 'cd /home/builder/termux-packages && export TERMUX_PKG_MAKE_PROCESSES=1 CARGO_PROFILE_RELEASE_LTO=false && echo "===== Container disk before build =====" && df -h / /data /data/data/com.codex.zhou/files/runtime/prefix && ./scripts/build-bootstraps.sh --android10 --architectures aarch64'
+          export TERMUX_DOCKER_RUN_EXTRA_ARGS="--volume $HOME/.termux-build:/home/builder/.termux-build --volume $HOME/.termux-build/prefix:/data/data/com.codex.zhou/files/runtime/prefix --volume $HOME/.termux-build/.built-packages:/data/data/.built-packages"
+          # Persist Termux's exact package-version markers, Cargo/Rustup and prefix.
+          # Build one package at a time and constrain Rust's peak build memory.
+          # Keep the full compiler output in a separate artifact; only emit periodic
+          # resource snapshots to the Actions console so the job log stays readable.
+          BUILD_LOG="$RUNNER_TEMP/private-runtime-build.log"
+          : > "$BUILD_LOG"
+          ./scripts/run-docker.sh bash -c 'cd /home/builder/termux-packages && export TERMUX_PKG_MAKE_PROCESSES=1 CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_HOME=/home/builder/.termux-build/cargo RUSTUP_HOME=/home/builder/.termux-build/rustup TERMUX_PKGS__BUILD__REUSE_BUILT_PACKAGES=true PATH=/home/builder/.termux-build/cargo/bin:$PATH && echo "===== Container disk before build =====" && df -h / /data /data/data/com.codex.zhou/files/runtime/prefix /data/data/.built-packages && free -h && echo "===== Cached package markers =====" && ls -la /data/data/.built-packages | tail -n 20 && echo "===== Bootstrap output directory preflight =====" && test -d /home/builder/termux-packages/output/bootstrap-dist && test -w /home/builder/termux-packages/output/bootstrap-dist && touch /home/builder/termux-packages/output/bootstrap-dist/.write-test && rm /home/builder/termux-packages/output/bootstrap-dist/.write-test && ./scripts/build-bootstraps.sh --android10 --architectures aarch64' >"$BUILD_LOG" 2>&1 &
+          BUILD_PID=$!
+          while kill -0 "$BUILD_PID" 2>/dev/null; do
+            echo "===== Runtime build heartbeat: $(date -u +'%Y-%m-%dT%H:%M:%SZ') ====="
+            echo "--- Host disk ---"
+            df -h "$HOME" || true
+            echo "--- Host memory ---"
+            free -h || true
+            echo "--- Cached build/prefix size ---"
+            du -sh "$HOME/.termux-build" "$HOME/.termux-build/prefix" 2>/dev/null || true
+            if docker inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
+              docker inspect "$CONTAINER_NAME" --format 'container={{.State.Status}} oom_killed={{.State.OOMKilled}} exit={{.State.ExitCode}}' || true
+              docker stats --no-stream "$CONTAINER_NAME" || true
+              docker exec "$CONTAINER_NAME" df -h / /data/data/com.codex.zhou/files/runtime/prefix 2>/dev/null || true
+              docker exec "$CONTAINER_NAME" free -h 2>/dev/null || true
+              echo "--- Container cgroup memory ---"
+              docker exec "$CONTAINER_NAME" sh -c 'for f in memory.current memory.peak memory.max; do test ! -r "/sys/fs/cgroup/$f" || { printf "%s=" "$f"; cat "/sys/fs/cgroup/$f"; }; done; test ! -r /sys/fs/cgroup/memory.events || cat /sys/fs/cgroup/memory.events' 2>/dev/null || true
+            else
+              echo "Builder container is not currently visible."
+            fi
+            echo "--- Last build output ---"
+            tail -n 8 "$BUILD_LOG" 2>/dev/null | cut -c1-500 || true
+            sleep 120
+          done
+          BUILD_STATUS=0
+          wait "$BUILD_PID" || BUILD_STATUS=$?
+          echo "===== Runtime build exited with status $BUILD_STATUS ====="
+          echo "--- Final build output ---"
+          tail -n 160 "$BUILD_LOG" | cut -c1-1000 || true
+          exit "$BUILD_STATUS"
+
+      # Save successful package markers and partial source/build state even when
+      # a later package fails. The next run restores the newest matching snapshot.
+      - name: Save incremental private ARM64 package cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.termux-build
+            vendor/termux-packages/output
+          key: termux-private-runtime-v3-${{ hashFiles('runtime/sources.lock.yml', 'runtime/private-runtime-config.json', 'scripts/prepare-private-runtime-source.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload ARM64 runtime build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm64-runtime-build-diagnostics
+          path: ${{ runner.temp }}/private-runtime-build.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Validate bootstrap and write provenance
         run: |
           python3 -m py_compile scripts/validate-private-runtime-bootstrap.py
           mkdir -p runtime/dist
-          cp vendor/termux-packages/output/bootstrap-aarch64.zip runtime/dist/
+          test -s vendor/termux-packages/output/bootstrap-dist/bootstrap-aarch64.zip
+          cp vendor/termux-packages/output/bootstrap-dist/bootstrap-aarch64.zip runtime/dist/
           python3 scripts/validate-private-runtime-bootstrap.py \
             runtime/dist/bootstrap-aarch64.zip \
             --manifest runtime/dist/bootstrap-manifest.json
@@ -152,6 +217,10 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+      - name: Install pinned Android NDK and CMake
+        run: sdkmanager --install "platforms;android-35" "build-tools;35.0.0" "ndk;27.0.12077973" "cmake;3.22.1"
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:

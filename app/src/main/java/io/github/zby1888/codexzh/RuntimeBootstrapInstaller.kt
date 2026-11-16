@@ -95,6 +95,12 @@ internal class RuntimeBootstrapInstaller(
             "运行时压缩包名称不匹配"
         }
         check(manifest.optLong("archiveSize") > 0L) { "运行时清单缺少压缩包大小" }
+        check(manifest.optLong("maxEntryBytes") == MAX_ENTRY_BYTES) {
+            "运行时单文件安全限制与 APK 安装器不匹配"
+        }
+        check(manifest.optLong("maxTotalBytes") == MAX_TOTAL_BYTES) {
+            "运行时总解压安全限制与 APK 安装器不匹配"
+        }
         check(manifest.optString("sha256").matches(Regex("^[0-9a-f]{64}$"))) {
             "运行时清单 SHA-256 格式无效"
         }
@@ -242,7 +248,7 @@ internal class RuntimeBootstrapInstaller(
     }
 
     private fun verifyInstalledFiles() {
-        val required = listOf(paths.bash, paths.env, paths.git, paths.jq, paths.execPreload)
+        val required = listOf(paths.bash, paths.env, paths.git, paths.execPreload)
         val missing = required.filterNot { it.exists() }
         check(missing.isEmpty()) {
             "运行时关键文件缺失：${missing.joinToString { it.relativeTo(paths.prefix).path }}"
@@ -345,9 +351,13 @@ internal class RuntimeBootstrapInstaller(
         private const val MANIFEST_ASSET = "runtime/bootstrap-manifest.json"
         private const val SYMLINKS_FILE = "SYMLINKS.txt"
         private const val MAX_ENTRIES = 80_000
-        private const val MAX_ENTRY_BYTES = 128L * 1024L * 1024L
+        // The pinned Codex 0.169.0 ARM64 executable in the shipped bootstrap is
+        // 202,819,272 bytes (about 193.4 MiB). 128 MiB rejected the valid binary.
+        // The APK verifies the archive SHA-256 before extraction; keep a bounded
+        // 256 MiB per-file cap and a 768 MiB total expansion cap.
+        private const val MAX_ENTRY_BYTES = 256L * 1024L * 1024L
         private const val MAX_SYMLINK_BYTES = 4L * 1024L * 1024L
-        private const val MAX_TOTAL_BYTES = 512L * 1024L * 1024L
+        private const val MAX_TOTAL_BYTES = 768L * 1024L * 1024L
         private const val MODE_0700 = 0x1C0
         private const val MODE_0600 = 0x180
     }

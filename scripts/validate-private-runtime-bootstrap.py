@@ -11,16 +11,22 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+MAX_ENTRY_BYTES = 256 * 1024 * 1024
+MAX_TOTAL_BYTES = 768 * 1024 * 1024
 CONFIG = json.loads((ROOT / "runtime/private-runtime-config.json").read_text(encoding="utf-8"))
 
 
 def safe_archive_path(name: str) -> str:
     if not name or name.startswith("/") or "\\" in name:
         raise ValueError(f"Unsafe archive path: {name!r}")
-    normalized = posixpath.normpath(name)
-    if normalized in {".", ".."} or normalized.startswith("../"):
+    # Match the on-device installer: allow one leading './', but reject every
+    # dot or parent segment instead of normalizing traversal away.
+    name = name.removeprefix("./")
+    trimmed = name.rstrip("/")
+    parts = trimmed.split("/")
+    if not trimmed or any(part in {"", ".", ".."} for part in parts):
         raise ValueError(f"Archive path escapes prefix: {name!r}")
-    return normalized.rstrip("/")
+    return "/".join(parts)
 
 
 def validate_symlink_target(link: str, target: str) -> None:
@@ -33,7 +39,9 @@ def validate_symlink_target(link: str, target: str) -> None:
         )
         if not (target == prefix or target.startswith(prefix + "/")
                 or target.startswith("/system/") or target.startswith("/apex/")
-                or target.startswith("/vendor/")):
+                or target.startswith("/vendor/") or target.startswith("/product/")
+                or target.startswith("/odm/") or target.startswith("/proc/")
+                or target.startswith("/dev/")):
             raise ValueError(f"Absolute symlink target escapes app prefix: {link} -> {target}")
     else:
         resolved = posixpath.normpath(posixpath.join(posixpath.dirname(link), target))
@@ -74,7 +82,38 @@ def main() -> None:
         raise SystemExit(f"Bootstrap archive not found: {archive}")
 
     with zipfile.ZipFile(archive) as zf:
-        names = {safe_archive_path(info.filename) for info in zf.infolist() if not info.is_dir()}
+        infos = zf.infolist()
+        file_infos = [info for info in infos if not info.is_dir()]
+        oversized = [
+            (info.filename, info.file_size)
+            for info in file_infos
+            if info.file_size > MAX_ENTRY_BYTES
+        ]
+        if oversized:
+            name, size = max(oversized, key=lambda item: item[1])
+            raise SystemExit(
+                f"Bootstrap file exceeds installer limit: {name} "
+                f"({size} bytes > {MAX_ENTRY_BYTES} bytes)"
+            )
+        total_uncompressed = sum(info.file_size for info in file_infos)
+        if total_uncompressed > MAX_TOTAL_BYTES:
+            raise SystemExit(
+                f"Bootstrap exceeds installer total extraction limit: "
+                f"{total_uncompressed} bytes > {MAX_TOTAL_BYTES} bytes"
+            )
+        print(
+            f"Archive preflight: {len(file_infos)} files, "
+            f"{total_uncompressed} uncompressed bytes, "
+            f"largest file {max(file_infos, key=lambda info: info.file_size).filename}"
+        )
+        archive_names = [safe_archive_path(info.filename) for info in infos]
+        if len(archive_names) != len(set(archive_names)):
+            raise SystemExit("Bootstrap archive contains duplicate normalized paths")
+        names = {
+            safe_archive_path(info.filename)
+            for info in infos
+            if not info.is_dir()
+        }
         if "SYMLINKS.txt" not in names:
             raise SystemExit("Bootstrap archive is missing SYMLINKS.txt")
         raw_links = zf.read("SYMLINKS.txt").decode("utf-8")
@@ -92,7 +131,7 @@ def main() -> None:
             links[link] = target
 
         required = [
-            "bin/bash", "bin/env", "bin/git", "bin/jq",
+            "bin/bash", "bin/env", "bin/git", "bin/rg",
             "lib/libtermux-exec-ld-preload.so",
             f"bin/{CONFIG['codexPackage']}", f"bin/{CONFIG['codexHelper']}",
         ]
@@ -101,17 +140,28 @@ def main() -> None:
             raise SystemExit("Bootstrap is missing required runtime paths: " + ", ".join(missing))
         if CONFIG["codexPackage"] not in CONFIG["packages"]:
             raise SystemExit("Codex package is missing from private-runtime-config.json")
+        if "ripgrep" not in CONFIG["packages"]:
+            raise SystemExit("ripgrep must be present in the base profile for Codex code search")
+        base_packages = set(CONFIG["packages"])
+        for profile_name, profile_packages in CONFIG.get("optionalPackageProfiles", {}).items():
+            if len(profile_packages) != len(set(profile_packages)):
+                raise SystemExit(f"Duplicate package in optional profile: {profile_name}")
+            overlap = base_packages.intersection(profile_packages)
+            if overlap:
+                raise SystemExit(f"Optional profile {profile_name} duplicates base packages: {sorted(overlap)}")
         validate_aarch64_elf(zf, f"bin/{CONFIG['codexPackage']}")
         validate_aarch64_elf(zf, f"bin/{CONFIG['codexHelper']}")
 
         # Reject any absolute or parent-traversing ZIP member, even if it is
         # not part of the executable set.
-        for info in zf.infolist():
+        for info in infos:
             safe_archive_path(info.filename)
 
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     manifest = {
         "schemaVersion": 1,
+        "maxEntryBytes": MAX_ENTRY_BYTES,
+        "maxTotalBytes": MAX_TOTAL_BYTES,
         "abi": "arm64-v8a",
         "applicationId": CONFIG["appPackageName"],
         "rootfs": CONFIG["rootfsSubdir"],
@@ -121,9 +171,8 @@ def main() -> None:
         "sourceRef": locked_ref("termux-packages"),
         "codexVersion": CONFIG["codexVersion"],
         "codexSourceRef": locked_ref("codex"),
-        "localizationSourceRef": locked_ref("codex-zh-localization"),
-        "localizationPatchCount": CONFIG["codexLocalizationPatchCount"],
         "packages": CONFIG["packages"],
+        "optionalPackageProfiles": CONFIG.get("optionalPackageProfiles", {}),
         "archive": archive.name,
         "archiveSize": archive.stat().st_size,
         "sha256": digest,
