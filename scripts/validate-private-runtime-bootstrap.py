@@ -11,6 +11,8 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+MAX_ENTRY_BYTES = 256 * 1024 * 1024
+MAX_TOTAL_BYTES = 768 * 1024 * 1024
 CONFIG = json.loads((ROOT / "runtime/private-runtime-config.json").read_text(encoding="utf-8"))
 
 
@@ -80,12 +82,36 @@ def main() -> None:
         raise SystemExit(f"Bootstrap archive not found: {archive}")
 
     with zipfile.ZipFile(archive) as zf:
-        archive_names = [safe_archive_path(info.filename) for info in zf.infolist()]
+        infos = zf.infolist()
+        file_infos = [info for info in infos if not info.is_dir()]
+        oversized = [
+            (info.filename, info.file_size)
+            for info in file_infos
+            if info.file_size > MAX_ENTRY_BYTES
+        ]
+        if oversized:
+            name, size = max(oversized, key=lambda item: item[1])
+            raise SystemExit(
+                f"Bootstrap file exceeds installer limit: {name} "
+                f"({size} bytes > {MAX_ENTRY_BYTES} bytes)"
+            )
+        total_uncompressed = sum(info.file_size for info in file_infos)
+        if total_uncompressed > MAX_TOTAL_BYTES:
+            raise SystemExit(
+                f"Bootstrap exceeds installer total extraction limit: "
+                f"{total_uncompressed} bytes > {MAX_TOTAL_BYTES} bytes"
+            )
+        print(
+            f"Archive preflight: {len(file_infos)} files, "
+            f"{total_uncompressed} uncompressed bytes, "
+            f"largest file {max(file_infos, key=lambda info: info.file_size).filename}"
+        )
+        archive_names = [safe_archive_path(info.filename) for info in infos]
         if len(archive_names) != len(set(archive_names)):
             raise SystemExit("Bootstrap archive contains duplicate normalized paths")
         names = {
             safe_archive_path(info.filename)
-            for info in zf.infolist()
+            for info in infos
             if not info.is_dir()
         }
         if "SYMLINKS.txt" not in names:
@@ -128,12 +154,14 @@ def main() -> None:
 
         # Reject any absolute or parent-traversing ZIP member, even if it is
         # not part of the executable set.
-        for info in zf.infolist():
+        for info in infos:
             safe_archive_path(info.filename)
 
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     manifest = {
         "schemaVersion": 1,
+        "maxEntryBytes": MAX_ENTRY_BYTES,
+        "maxTotalBytes": MAX_TOTAL_BYTES,
         "abi": "arm64-v8a",
         "applicationId": CONFIG["appPackageName"],
         "rootfs": CONFIG["rootfsSubdir"],
