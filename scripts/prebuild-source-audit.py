@@ -84,6 +84,13 @@ if "appendCompletedTurnItems(turn)" not in chat or "fun monitorTurn(" not in cha
     errors.append("CodexChatScreen.kt: completed turn reconciliation and history polling are missing")
 if "codexErrorInfo" not in chat or "additionalDetails" not in chat:
     errors.append("CodexChatScreen.kt: structured Codex turn errors are not exposed")
+if "TerminalSurface(terminal.frame) { terminal.loadScrollback() }" not in main:
+    errors.append("MainActivity.kt: terminal view must request native scrollback")
+terminal_view = (ROOT / "app/src/main/java/io/github/zby1888/codexzh/TerminalSoftwareView.kt").read_text()
+if "scrollbackLoader" not in terminal_view or "MotionEvent.ACTION_MOVE" not in terminal_view:
+    errors.append("TerminalSoftwareView.kt: vertical scroll gestures are missing")
+if "scrollbackPushLine" not in native or "sb_pushline=scrollbackPushLine" not in native or "nativeScrollbackSnapshot" not in native:
+    errors.append("native_pty_terminal.cpp: libvterm scrollback callbacks are not connected")
 if "VTermScreenCallbacks screenCallbacks{}" not in native or "&terminal->screenCallbacks" not in native:
     errors.append("native_pty_terminal.cpp: libvterm callback lifetime regression")
 if "VTermScreenCallbacks callbacks{}" in native:

@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.view.MotionEvent
 import android.view.View
 
 /**
@@ -14,6 +15,11 @@ import android.view.View
  */
 internal class TerminalSoftwareView(context: Context) : View(context) {
     private var currentFrame: TerminalFrame = TerminalFrame.blank(24, 80)
+    private var scrollbackLoader: (() -> Unit)? = null
+    private var scrollOffsetRows = 0
+    private var pendingScrollRows = 0
+    private var lastTouchY = 0f
+    private var dragRemainder = 0f
 
     private val regularTypeface = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL)
     private val italicTypeface = Typeface.create(Typeface.MONOSPACE, Typeface.ITALIC)
@@ -24,6 +30,11 @@ internal class TerminalSoftwareView(context: Context) : View(context) {
         style = Paint.Style.STROKE
         strokeWidth = 1.5f
     }
+    private val scrollHintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.rgb(147, 197, 253)
+        textSize = 12f * resources.displayMetrics.density
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+    }
 
     init {
         setLayerType(View.LAYER_TYPE_SOFTWARE, null)
@@ -31,9 +42,67 @@ internal class TerminalSoftwareView(context: Context) : View(context) {
         textPaint.typeface = regularTypeface
     }
 
+    fun setScrollbackLoader(loader: (() -> Unit)?) {
+        scrollbackLoader = loader
+    }
+
     fun updateFrame(frame: TerminalFrame) {
+        val hadNoHistory = currentFrame.scrollback.isEmpty()
         currentFrame = frame
+        if (hadNoHistory && frame.scrollback.isNotEmpty() && pendingScrollRows > 0) {
+            scrollOffsetRows = pendingScrollRows.coerceIn(1, frame.scrollback.size)
+            pendingScrollRows = 0
+        }
+        scrollOffsetRows = scrollOffsetRows.coerceIn(0, frame.scrollback.size)
         invalidate()
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                lastTouchY = event.y
+                dragRemainder = 0f
+                parent?.requestDisallowInterceptTouchEvent(true)
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val delta = event.y - lastTouchY
+                lastTouchY = event.y
+                val rowHeight = height.toFloat() / currentFrame.rows.coerceAtLeast(1)
+                if (rowHeight > 0f) {
+                    dragRemainder += delta
+                    val lines = (dragRemainder / rowHeight).toInt()
+                    if (lines != 0) {
+                        dragRemainder -= lines * rowHeight
+                        if (currentFrame.scrollback.isEmpty() && lines > 0) {
+                            pendingScrollRows = (pendingScrollRows + lines).coerceAtLeast(1)
+                            scrollbackLoader?.invoke()
+                        } else {
+                            scrollOffsetRows = (scrollOffsetRows + lines)
+                                .coerceIn(0, currentFrame.scrollback.size)
+                            invalidate()
+                        }
+                    }
+                }
+                return true
+            }
+            MotionEvent.ACTION_UP -> {
+                if (scrollOffsetRows > 0) scrollbackLoader?.invoke()
+                parent?.requestDisallowInterceptTouchEvent(false)
+                performClick()
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                parent?.requestDisallowInterceptTouchEvent(false)
+                return true
+            }
+        }
+        return super.onTouchEvent(event)
+    }
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -48,7 +117,15 @@ internal class TerminalSoftwareView(context: Context) : View(context) {
         val metrics = textPaint.fontMetrics
         val baselineOffset = (cellHeight - metrics.descent - metrics.ascent) / 2f
 
-        frame.cells.forEachIndexed { row, cells ->
+        val visibleCells = if (scrollOffsetRows > 0 && frame.scrollback.isNotEmpty()) {
+            val combined = frame.scrollback + frame.cells
+            val end = (combined.size - scrollOffsetRows).coerceIn(frame.rows, combined.size)
+            combined.subList(end - frame.rows, end)
+        } else {
+            frame.cells
+        }
+
+        visibleCells.forEachIndexed { row, cells ->
             cells.forEachIndexed { column, cell ->
                 val reverse = (cell.flags and (1 shl 3)) != 0
                 val foreground = if (reverse) cell.background else cell.foreground
@@ -94,10 +171,18 @@ internal class TerminalSoftwareView(context: Context) : View(context) {
             }
         }
 
-        if (frame.cursorVisible) {
+        if (frame.cursorVisible && scrollOffsetRows == 0) {
             val left = frame.cursorColumn * cellWidth
             val top = frame.cursorRow * cellHeight
             canvas.drawRect(left, top, left + cellWidth, top + cellHeight, cursorPaint)
+        }
+        if (scrollOffsetRows > 0) {
+            canvas.drawText(
+                "历史记录 · 向下拖动查看更多 · 向上拖动回到最新",
+                8f * resources.displayMetrics.density,
+                16f * resources.displayMetrics.density,
+                scrollHintPaint
+            )
         }
     }
 }

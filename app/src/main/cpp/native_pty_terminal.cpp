@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <algorithm>
 #include <atomic>
+#include <deque>
 #include <exception>
 #include <memory>
 #include <mutex>
@@ -22,14 +23,16 @@
 #include <vterm.h>
 
 namespace {
-constexpr uint32_t kMagic=0x435A5452, kVersion=1, kDefaultColor=UINT32_MAX;
+constexpr uint32_t kMagic=0x435A5452, kVersion=1, kScrollbackVersion=1, kDefaultColor=UINT32_MAX;
 constexpr jint kRunning=INT32_MIN;
+constexpr size_t kMaxScrollbackLines=500;
 
 struct Terminal {
     int master=-1; pid_t child=-1; int rows=24,columns=80;
     VTerm* vt=nullptr; VTermScreen* screen=nullptr;
     // libvterm retains this pointer; it must outlive the VTermScreen.
     VTermScreenCallbacks screenCallbacks{};
+    std::deque<std::vector<VTermScreenCell>> scrollback;
     bool cursorVisible=true,reaped=false,closing=false;
     int exitCode=0;
     std::mutex mutex;
@@ -84,6 +87,29 @@ int termProperty(VTermProp property,VTermValue* value,void* user) {
         static_cast<Terminal*>(user)->cursorVisible=value->boolean!=0;
     return 1;
 }
+int scrollbackPushLine(int columns,const VTermScreenCell* cells,void* user) {
+    auto* terminal=static_cast<Terminal*>(user);
+    if(!terminal || columns<=0 || !cells)return 0;
+    terminal->scrollback.emplace_back(cells,cells+columns);
+    while(terminal->scrollback.size()>kMaxScrollbackLines)terminal->scrollback.pop_front();
+    return 1;
+}
+int scrollbackPopLine(int columns,VTermScreenCell* cells,void* user) {
+    auto* terminal=static_cast<Terminal*>(user);
+    if(!terminal || columns<=0 || !cells || terminal->scrollback.empty())return 0;
+    auto line=std::move(terminal->scrollback.back());
+    terminal->scrollback.pop_back();
+    for(int column=0;column<columns;++column) {
+        if(static_cast<size_t>(column)<line.size())cells[column]=line[static_cast<size_t>(column)];
+        else { memset(&cells[column],0,sizeof(VTermScreenCell)); cells[column].width=1; }
+    }
+    return 1;
+}
+int scrollbackClear(void* user) {
+    auto* terminal=static_cast<Terminal*>(user);
+    if(terminal)terminal->scrollback.clear();
+    return 1;
+}
 void put32(std::vector<uint8_t>& out,uint32_t value) {
     out.push_back(value&0xff); out.push_back((value>>8)&0xff);
     out.push_back((value>>16)&0xff); out.push_back((value>>24)&0xff);
@@ -119,6 +145,20 @@ void reap(Terminal* terminal) {
         terminal->reaped=true; terminal->exitCode=255;
     }
 }
+void appendCell(std::vector<uint8_t>& out,VTermScreen* screen,const VTermScreenCell& cell) {
+    for(uint32_t cp:cell.chars)put32(out,cp);
+    put32(out,std::max(0,static_cast<int>(cell.width)));
+    uint32_t flags=0;
+    if(cell.attrs.bold)flags|=1U;
+    if(cell.attrs.italic)flags|=1U<<1;
+    if(cell.attrs.underline)flags|=1U<<2;
+    if(cell.attrs.reverse)flags|=1U<<3;
+    if(cell.attrs.strike)flags|=1U<<4;
+    if(cell.attrs.blink)flags|=1U<<5;
+    put32(out,flags);
+    put32(out,colorRgb(screen,cell.fg,VTERM_COLOR_IS_DEFAULT_FG(&cell.fg)));
+    put32(out,colorRgb(screen,cell.bg,VTERM_COLOR_IS_DEFAULT_BG(&cell.bg)));
+}
 std::vector<uint8_t> makeSnapshot(Terminal* terminal) {
     std::vector<uint8_t> out;
     out.reserve(28+static_cast<size_t>(terminal->rows)*terminal->columns*40);
@@ -129,18 +169,24 @@ std::vector<uint8_t> makeSnapshot(Terminal* terminal) {
     for(int row=0;row<terminal->rows;++row)for(int col=0;col<terminal->columns;++col) {
         VTermScreenCell cell{}; const VTermPos pos{row,col};
         if(!vterm_screen_get_cell(terminal->screen,pos,&cell))memset(&cell,0,sizeof(cell));
-        for(uint32_t cp:cell.chars)put32(out,cp);
-        put32(out,std::max(0,static_cast<int>(cell.width)));
-        uint32_t flags=0;
-        if(cell.attrs.bold)flags|=1U;
-        if(cell.attrs.italic)flags|=1U<<1;
-        if(cell.attrs.underline)flags|=1U<<2;
-        if(cell.attrs.reverse)flags|=1U<<3;
-        if(cell.attrs.strike)flags|=1U<<4;
-        if(cell.attrs.blink)flags|=1U<<5;
-        put32(out,flags);
-        put32(out,colorRgb(terminal->screen,cell.fg,VTERM_COLOR_IS_DEFAULT_FG(&cell.fg)));
-        put32(out,colorRgb(terminal->screen,cell.bg,VTERM_COLOR_IS_DEFAULT_BG(&cell.bg)));
+        appendCell(out,terminal->screen,cell);
+    }
+    return out;
+}
+std::vector<uint8_t> makeScrollbackSnapshot(Terminal* terminal) {
+    const uint32_t count=static_cast<uint32_t>(terminal->scrollback.size());
+    const int columns=terminal->columns;
+    std::vector<uint8_t> out;
+    out.reserve(16+static_cast<size_t>(count)*columns*40);
+    put32(out,kMagic); put32(out,kScrollbackVersion); put32(out,count); put32(out,columns);
+    for(const auto& line:terminal->scrollback) {
+        for(int column=0;column<columns;++column) {
+            VTermScreenCell blank{};
+            blank.width=1;
+            const auto& cell=static_cast<size_t>(column)<line.size()
+                ? line[static_cast<size_t>(column)] : blank;
+            appendCell(out,terminal->screen,cell);
+        }
     }
     return out;
 }
@@ -246,6 +292,9 @@ Java_io_github_zby1888_codexzh_NativePtyBridge_nativeCreate(
     // Keep it inside Terminal so it remains valid until vterm_free().
     terminal->screenCallbacks={};
     terminal->screenCallbacks.settermprop=termProperty;
+    terminal->screenCallbacks.sb_pushline=scrollbackPushLine;
+    terminal->screenCallbacks.sb_popline=scrollbackPopLine;
+    terminal->screenCallbacks.sb_clear=scrollbackClear;
     vterm_screen_set_callbacks(terminal->screen,&terminal->screenCallbacks,terminal.get());
     vterm_screen_reset(terminal->screen,1);
     try {
@@ -333,6 +382,19 @@ Java_io_github_zby1888_codexzh_NativePtyBridge_nativeSnapshot(JNIEnv* env,jobjec
     if(result&&!bytes.empty())env->SetByteArrayRegion(result,0,static_cast<jsize>(bytes.size()),reinterpret_cast<const jbyte*>(bytes.data()));
     return result;
 }
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_io_github_zby1888_codexzh_NativePtyBridge_nativeScrollbackSnapshot(JNIEnv* env,jobject,jlong handle) {
+    auto term=findTerminal(handle);if(!term)return nullptr;
+    std::lock_guard<std::mutex> lock(term->mutex);
+    if(term->closing||!term->vt||!term->screen)return nullptr;
+    const auto bytes=makeScrollbackSnapshot(term.get());
+    if(bytes.size()>static_cast<size_t>(INT32_MAX))return nullptr;
+    jbyteArray result=env->NewByteArray(static_cast<jsize>(bytes.size()));
+    if(result&&!bytes.empty())env->SetByteArrayRegion(result,0,static_cast<jsize>(bytes.size()),
+        reinterpret_cast<const jbyte*>(bytes.data()));
+    return result;
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_io_github_zby1888_codexzh_NativePtyBridge_nativeExitCode(JNIEnv*,jobject,jlong handle) {
     auto term=findTerminal(handle);if(!term)return 255;

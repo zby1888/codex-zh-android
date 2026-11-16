@@ -13,7 +13,8 @@ import java.nio.ByteOrder
 internal data class TerminalCell(val text:String,val width:Int,val foreground:Int?,val background:Int?,val flags:Int)
 internal data class TerminalFrame(
     val rows:Int,val columns:Int,val cursorRow:Int,val cursorColumn:Int,
-    val cursorVisible:Boolean,val cells:List<List<TerminalCell>>
+    val cursorVisible:Boolean,val cells:List<List<TerminalCell>>,
+    val scrollback:List<List<TerminalCell>> = emptyList()
 ) {
     companion object {
         fun blank(rows:Int,columns:Int):TerminalFrame {
@@ -30,6 +31,7 @@ internal class NativePtyBridge {
     external fun nativeWrite(handle:Long,bytes:ByteArray):Int
     external fun nativeResize(handle:Long,rows:Int,columns:Int):Boolean
     external fun nativeSnapshot(handle:Long):ByteArray
+    external fun nativeScrollbackSnapshot(handle:Long):ByteArray
     external fun nativeExitCode(handle:Long):Int
     external fun nativeClose(handle:Long)
 }
@@ -41,6 +43,7 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
     private val nativeMutex=Mutex()
     @Volatile private var handle=0L
     private var readerJob:Job?=null
+    @Volatile private var scrollbackCache:List<List<TerminalCell>> = emptyList()
 
     var frame by mutableStateOf(TerminalFrame.blank(24,80)); private set
     var isRunning by mutableStateOf(false); private set
@@ -114,6 +117,7 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
             arguments = arrayOf(executable, "-c", rootCommand)
         }
 
+        scrollbackCache=emptyList()
         val newHandle=try {
             nativeMutex.withLock {
                 CrashLogManager.recordEvent(paths.appFiles, "terminal.native_create.begin")
@@ -177,6 +181,30 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
                 else runCatching { decodeSnapshot(bridge.nativeSnapshot(current)) }.getOrNull()
             }
             if(next!=null) withContext(Dispatchers.Main.immediate){if(handle==current) frame=next}
+        }
+    }
+
+    /** Fetch libvterm's bounded history only when the user starts scrolling. */
+    fun loadScrollback() {
+        val activeHandle=handle
+        if(activeHandle==0L)return
+        scope.launch {
+            try {
+                val loaded:List<List<TerminalCell>>?=nativeMutex.withLock {
+                    if(handle!=activeHandle) null
+                    else decodeScrollback(bridge.nativeScrollbackSnapshot(activeHandle))
+                }
+                if(loaded!=null) {
+                    scrollbackCache=loaded
+                    withContext(Dispatchers.Main.immediate) {
+                        if(handle==activeHandle) frame=frame.copy(scrollback=loaded)
+                    }
+                }
+            } catch(error:Exception) {
+                withContext(Dispatchers.Main.immediate) {
+                    if(handle==activeHandle) message=error.message?:"读取终端滚动缓冲失败"
+                }
+            }
         }
     }
 
@@ -271,12 +299,43 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
             }
         }
         return TerminalFrame(rowCount,columnCount,cursorRow.coerceIn(0,rowCount-1),
-            cursorColumn.coerceIn(0,columnCount-1),cursorVisible,cells)
+            cursorColumn.coerceIn(0,columnCount-1),cursorVisible,cells,scrollbackCache)
+    }
+
+    private fun decodeScrollback(bytes:ByteArray):List<List<TerminalCell>> {
+        val input=ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        require(input.remaining()>=16){"终端滚动缓冲数据不完整"}
+        require(input.int==SNAPSHOT_MAGIC){"终端滚动缓冲标记不正确"}
+        require(input.int==SCROLLBACK_VERSION){"终端滚动缓冲版本暂不支持"}
+        val lineCount=input.int
+        val columnCount=input.int
+        require(lineCount in 0..MAX_SCROLLBACK_LINES && columnCount in 20..160) {
+            "终端滚动缓冲尺寸不合法"
+        }
+        require(input.remaining()==lineCount*columnCount*40){"终端滚动缓冲数据长度不正确"}
+        return List(lineCount) {
+            List(columnCount) {
+                val codePoints=IntArray(6){input.int}
+                val width=input.int
+                val flags=input.int
+                val fg=input.int
+                val bg=input.int
+                val text=buildString {
+                    codePoints.forEach { cp ->
+                        if(cp>0 && Character.isValidCodePoint(cp))appendCodePoint(cp)
+                    }
+                }
+                TerminalCell(text,width.coerceIn(0,2),
+                    fg.takeUnless{it==DEFAULT_COLOR},bg.takeUnless{it==DEFAULT_COLOR},flags)
+            }
+        }
     }
 
     private companion object {
         const val SNAPSHOT_MAGIC=0x435A5452
         const val SNAPSHOT_VERSION=1
+        const val SCROLLBACK_VERSION=1
+        const val MAX_SCROLLBACK_LINES=500
         const val DEFAULT_COLOR=-1
         const val NATIVE_RUNNING=Int.MIN_VALUE
     }

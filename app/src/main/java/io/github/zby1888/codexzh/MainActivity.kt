@@ -309,7 +309,7 @@ private fun TerminalScreen(
                     terminalHeightPx = size.height
                 }
         ) {
-            TerminalSurface(terminal.frame)
+            TerminalSurface(terminal.frame) { terminal.loadScrollback() }
         }
 
         Row(
@@ -422,10 +422,18 @@ private fun TerminalKeyButton(label: String, enabled: Boolean, onClick: () -> Un
 }
 
 @Composable
-private fun TerminalSurface(frame: TerminalFrame) {
+private fun TerminalSurface(frame: TerminalFrame, onScrollbackRequested: () -> Unit) {
     AndroidView(
-        factory = { context -> TerminalSoftwareView(context).apply { updateFrame(frame) } },
-        update = { view -> view.updateFrame(frame) },
+        factory = { context ->
+            TerminalSoftwareView(context).apply {
+                setScrollbackLoader(onScrollbackRequested)
+                updateFrame(frame)
+            }
+        },
+        update = { view ->
+            view.setScrollbackLoader(onScrollbackRequested)
+            view.updateFrame(frame)
+        },
         modifier = Modifier.fillMaxSize().padding(4.dp)
     )
 }
