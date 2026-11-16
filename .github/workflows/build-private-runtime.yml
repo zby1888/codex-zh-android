@@ -19,8 +19,6 @@ on:
       - "app/src/main/AndroidManifest.xml"
       - "app/src/main/res/xml/crash_log_paths.xml"
       - "app/build.gradle.kts"
-      - "app/src/main/java/io/github/zby1888/codexzh/CrashLogManager.kt"
-      - "app/src/main/java/io/github/zby1888/codexzh/CrashLogScreen.kt"
       - "app/src/main/java/io/github/zby1888/codexzh/TerminalSoftwareView.kt"
       - "app/src/main/cpp/native_pty_terminal.cpp"
       - ".github/workflows/build-private-runtime.yml"
@@ -43,8 +41,6 @@ on:
       - "app/src/main/AndroidManifest.xml"
       - "app/src/main/res/xml/crash_log_paths.xml"
       - "app/build.gradle.kts"
-      - "app/src/main/java/io/github/zby1888/codexzh/CrashLogManager.kt"
-      - "app/src/main/java/io/github/zby1888/codexzh/CrashLogScreen.kt"
       - "app/src/main/cpp/native_pty_terminal.cpp"
       - ".github/workflows/build-private-runtime.yml"
   workflow_dispatch:

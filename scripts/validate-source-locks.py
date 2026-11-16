@@ -94,6 +94,26 @@ if "nativeCanvas" in main_activity:
 if "canvas.drawText(cell.text" not in terminal_view or "canvas.drawRect(" not in terminal_view:
     raise SystemExit("Software terminal renderer must preserve terminal glyph and cell rendering")
 
+crash_manager = (path.parent.parent / "app" / "src" / "main" / "java" / "io" / "github" / "zby1888" / "codexzh" / "CrashLogManager.kt").read_text(encoding="utf-8")
+crash_screen = (path.parent.parent / "app" / "src" / "main" / "java" / "io" / "github" / "zby1888" / "codexzh" / "CrashLogScreen.kt").read_text(encoding="utf-8")
+manifest = (path.parent.parent / "app" / "src" / "main" / "AndroidManifest.xml").read_text(encoding="utf-8")
+for required in ("setDefaultUncaughtExceptionHandler", "getHistoricalProcessExitReasons", "getTraceInputStream", "tombstone.pb", "recordEvent"):
+    if required not in crash_manager:
+        raise SystemExit(f"Crash logger is missing required capture behavior: {required}")
+if "terminal.native_create.begin" not in pty_session or "terminal.reader.started" not in pty_session:
+    raise SystemExit("PTY lifecycle breadcrumbs must be written before/after native startup")
+if "CrashLogManager.install(applicationContext)" not in main_activity:
+    raise SystemExit("Java/Kotlin crash handler must be installed at app startup")
+if "collectPreviousProcessExits(applicationContext)" not in main_activity:
+    raise SystemExit("Android historical process-exit records must be collected on app startup")
+if "CrashLogScreen(Modifier.padding(padding))" not in main_activity or "导出全部日志" not in crash_screen:
+    raise SystemExit("Crash logs must be visible and exportable inside the app")
+if "androidx.core.content.FileProvider" not in manifest or "@xml/crash_log_paths" not in manifest:
+    raise SystemExit("Crash-log export must use a scoped FileProvider")
+for diagnostic_path in ("CrashLogManager.kt", "CrashLogScreen.kt", "crash_log_paths.xml"):
+    if diagnostic_path not in runtime_workflow:
+        raise SystemExit(f"Full APK workflow must be triggered by diagnostics file changes: {diagnostic_path}")
+
 target_sdk = re.search(r"targetSdk\s*=\s*(\d+)", app_gradle)
 if target_sdk and int(target_sdk.group(1)) >= 29:
     for required in (

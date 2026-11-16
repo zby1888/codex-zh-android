@@ -44,7 +44,7 @@ CI 资源策略：
 - Cargo、Rustup、Termux source/build/cache、安装 PREFIX 和 `/data/data/.built-packages` 版本标记都放在 GitHub Actions 缓存卷中。缓存按来源锁、包配置和补丁脚本隔离；每次运行使用新的快照键，并在成功或失败后保存已完成包标记与部分编译状态，下一轮从最近快照接着做。
 - Docker builder 只构建一次，并使用 BuildKit GHA cache 保存镜像层，避免重复构建后又覆盖带缓存的镜像。
 - 每 2 分钟采集宿主机/容器磁盘、内存、Docker 使用量和 cgroup OOM 事件；构建结束输出明确退出码和最后日志。
-- 私有 Runtime 工作流不因纯 UI 文件变更重跑；运行环境任务不因新提交直接取消正在执行的昂贵编译。
+- 完整 APK 工作流监视运行时启动、PTY、诊断页、Manifest 和构建配置；这些代码变更会触发完整包组装，纯文档变更不会触发。缓存命中时应复用已编译的 Termux 软件包。
 
 ## 离线安装与完整性
 
