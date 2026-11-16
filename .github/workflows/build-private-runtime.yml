@@ -8,6 +8,11 @@ on:
       - "runtime/private-runtime-config.json"
       - "scripts/prepare-private-runtime-source.py"
       - "scripts/validate-private-runtime-bootstrap.py"
+      - "scripts/validate-source-locks.py"
+      - "app/src/main/java/io/github/zby1888/codexzh/RuntimePaths.kt"
+      - "app/src/main/java/io/github/zby1888/codexzh/RuntimeManager.kt"
+      - "app/src/main/java/io/github/zby1888/codexzh/CodexAppServerClient.kt"
+      - "app/src/main/java/io/github/zby1888/codexzh/PtyTerminalSession.kt"
       - ".github/workflows/build-private-runtime.yml"
   # Documentation-only edits under runtime/ do not start the multi-hour ARM64 build.
   pull_request:
@@ -17,6 +22,11 @@ on:
       - "runtime/private-runtime-config.json"
       - "scripts/prepare-private-runtime-source.py"
       - "scripts/validate-private-runtime-bootstrap.py"
+      - "scripts/validate-source-locks.py"
+      - "app/src/main/java/io/github/zby1888/codexzh/RuntimePaths.kt"
+      - "app/src/main/java/io/github/zby1888/codexzh/RuntimeManager.kt"
+      - "app/src/main/java/io/github/zby1888/codexzh/CodexAppServerClient.kt"
+      - "app/src/main/java/io/github/zby1888/codexzh/PtyTerminalSession.kt"
       - ".github/workflows/build-private-runtime.yml"
   workflow_dispatch:
 

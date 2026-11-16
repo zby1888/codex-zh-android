@@ -90,11 +90,14 @@ internal class RuntimeManager(context: Context) {
         check(helper.isFile && helper.canExecute()) { "codex-code-mode-host 文件不存在或没有执行权限" }
         val outputFile = File.createTempFile("codex-version-", ".txt", paths.temp)
         try {
-            val builder = ProcessBuilder(codex.absolutePath, "--version")
+            val builder = ProcessBuilder(paths.commandFor(codex, listOf("--version")))
                 .directory(paths.home)
                 .redirectErrorStream(true)
                 .redirectOutput(outputFile)
             builder.environment().putAll(paths.environment())
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                builder.environment()["TERMUX_EXEC__PROC_SELF_EXE"] = codex.absolutePath
+            }
             val process = builder.start()
 
             // Process.waitFor(timeout, unit) and destroyForcibly() are not

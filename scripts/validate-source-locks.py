@@ -68,6 +68,31 @@ if not version or version.group(1) != config.get("codexVersion"):
 if "jq" not in base_set and ("paths.jq.exists()" in runtime_manager or "paths.jq" in installer):
     raise SystemExit("Optional jq package is incorrectly treated as a base runtime requirement")
 
+runtime_paths = (path.parent.parent / "app" / "src" / "main" / "java" / "io" / "github" / "zby1888" / "codexzh" / "RuntimePaths.kt").read_text(encoding="utf-8")
+app_server = (path.parent.parent / "app" / "src" / "main" / "java" / "io" / "github" / "zby1888" / "codexzh" / "CodexAppServerClient.kt").read_text(encoding="utf-8")
+pty_session = (path.parent.parent / "app" / "src" / "main" / "java" / "io" / "github" / "zby1888" / "codexzh" / "PtyTerminalSession.kt").read_text(encoding="utf-8")
+target_sdk = re.search(r"targetSdk\s*=\s*(\d+)", app_gradle)
+if target_sdk and int(target_sdk.group(1)) >= 29:
+    for required in (
+        'File("/system/bin/linker64")',
+        "fun commandFor(",
+        '"TERMUX_APP__DATA_DIR"',
+        '"TERMUX_APP__LEGACY_DATA_DIR"',
+        '"TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE" to "enable"',
+    ):
+        if required not in runtime_paths:
+            raise SystemExit(f"Android W^X linker launcher contract missing: {required}")
+    if 'paths.commandFor(codex, listOf("--version"))' not in runtime_manager:
+        raise SystemExit("Codex version check must use the Android system-linker launcher")
+    if "TERMUX_EXEC__PROC_SELF_EXE" not in runtime_manager:
+        raise SystemExit("Codex version check must identify the linker-launched ELF")
+    if 'paths.commandFor(codex, listOf("app-server", "--listen", "stdio://"))' not in app_server:
+        raise SystemExit("Codex App Server must use the Android system-linker launcher")
+    if "TERMUX_EXEC__PROC_SELF_EXE" not in app_server:
+        raise SystemExit("Codex App Server must identify the linker-launched ELF")
+    if 'paths.commandFor(paths.bash, listOf("-i"))' not in pty_session:
+        raise SystemExit("Interactive Bash must use the Android system-linker launcher")
+
 prepare_script = (path.parent.parent / "scripts" / "prepare-private-runtime-source.py").read_text(encoding="utf-8")
 runtime_workflow = (path.parent.parent / ".github" / "workflows" / "build-private-runtime.yml").read_text(encoding="utf-8")
 if '"${TERMUX_BUILT_DEBS_DIRECTORY}/bootstrap-dist/"' not in prepare_script:

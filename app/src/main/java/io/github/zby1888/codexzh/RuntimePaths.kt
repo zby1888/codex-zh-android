@@ -1,6 +1,7 @@
 package io.github.zby1888.codexzh
 
 import android.content.Context
+import android.os.Build
 import java.io.File
 
 /**
@@ -25,6 +26,23 @@ internal data class RuntimePaths(
     val codex: File get() = File(bin, "codex")
     val codexCodeModeHost: File get() = File(bin, "codex-code-mode-host")
     val execPreload: File get() = File(prefix, "lib/libtermux-exec-ld-preload.so")
+    val systemLinker64: File get() = File("/system/bin/linker64")
+
+    /**
+     * Android 10+ blocks untrusted apps targeting API 29+ from exec() on
+     * writable app-data files (W^X). Launch private ELF files through linker64.
+     */
+    fun commandFor(executable: File, arguments: List<String> = emptyList()): List<String> {
+        val binary = executable.absolutePath
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            check(systemLinker64.isFile && systemLinker64.canExecute()) {
+                "Android 系统 linker64 不可用，无法启动应用私有 ARM64 程序"
+            }
+            listOf(systemLinker64.absolutePath, binary) + arguments
+        } else {
+            listOf(binary) + arguments
+        }
+    }
     val layoutMarker: File get() = File(runtimeRoot, ".layout.properties")
     val runtimeMarker: File get() = File(runtimeRoot, ".runtime.properties")
 
@@ -36,7 +54,10 @@ internal data class RuntimePaths(
         "TERMUX__HOME" to home.absolutePath,
         "TERMUX_ANDROID_HOME" to home.absolutePath,
         "TERMUX_APP__PACKAGE_NAME" to appPackageName,
-        "HOME" to home.absolutePath,
+        "TERMUX_APP__DATA_DIR" to appFiles.parentFile.absolutePath,
+        "TERMUX_APP__LEGACY_DATA_DIR" to appFiles.parentFile.absolutePath,
+        "TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE" to "enable",
+        "TERMUX_EXEC__EXECVE_CALL__INTERCEPT" to "enable",        "HOME" to home.absolutePath,
         "CODEX_HOME" to codexHome.absolutePath,
         "TMPDIR" to temp.absolutePath,
         "PATH" to "${bin.absolutePath}:/system/bin",

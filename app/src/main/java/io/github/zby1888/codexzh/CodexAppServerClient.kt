@@ -75,13 +75,13 @@ internal class CodexAppServerClient(
         check(codex.isFile && codex.canExecute()) { "私有运行环境中没有可执行的 codex" }
 
         val builder = ProcessBuilder(
-            codex.absolutePath,
-            "app-server",
-            "--listen",
-            "stdio://"
+            paths.commandFor(codex, listOf("app-server", "--listen", "stdio://"))
         ).directory(paths.home)
         val childEnvironment = builder.environment()
         childEnvironment.putAll(paths.environment())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            childEnvironment["TERMUX_EXEC__PROC_SELF_EXE"] = codex.absolutePath
+        }
         environmentOverrides.forEach { (key, value) ->
             require(key.matches(Regex("[A-Z_][A-Z0-9_]{0,127}"))) { "运行环境变量名称不合法" }
             require(value.none { it.code == 0 }) { "运行环境变量内容不合法" }

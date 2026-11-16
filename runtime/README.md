@@ -54,6 +54,7 @@ APK 内置的 bootstrap ZIP 和来源清单由安装器处理：
 - 限制 ZIP 文件数量、单文件大小和解压总量：当前单文件上限 256 MiB、总解压上限 768 MiB；固定版本 Codex 0.169.0 的 `bin/codex` 实测为 202,819,272 字节（约 193.4 MiB），此前 128 MiB 上限会错误拒绝有效二进制。构建端会提前按相同上限检查归档，APK 内安装器也会核对清单里的安全限值。
 - 单独解析并验证符号链接，拒绝指向应用私有前缀以外的任意数据目录。
 - 在独立 staging 目录解包，设置私有文件权限，然后原子切换 PREFIX。
+- Android 10+ 且 targetSdkVersion >= 29 时，通过 `/system/bin/linker64` 启动私有 PREFIX 中的 ELF，并预加载 `termux-exec`；不能从 Java `ProcessBuilder` 直接 `exec()` `/data/data/<包名>/files` 下的二进制，否则会触发 W^X/SELinux `Permission denied`。
 - 写入安装状态标记；失败时尝试回滚旧 PREFIX。
 
 安装过程不需要 Root、Termux 或网络连接。Root 仅是后续设备调试的可选权限，与基础运行环境安装无关。

@@ -66,8 +66,12 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
         val executable: String
         val arguments: Array<String>
         if (!isRoot) {
-            executable = paths.bash.absolutePath
-            arguments = arrayOf(executable, "-i")
+            val launchCommand = paths.commandFor(paths.bash, listOf("-i"))
+            executable = launchCommand.first()
+            arguments = launchCommand.toTypedArray()
+            if (launchCommand.first() != paths.bash.absolutePath) {
+                environment["TERMUX_EXEC__PROC_SELF_EXE"] = paths.bash.absolutePath
+            }
         } else {
             val su = File(rootSuPath!!)
             check(su.isFile && su.canExecute()) { "Root 管理器提供的 su 路径已不可用，请重新申请授权" }
@@ -102,7 +106,7 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
                 append("unset CODEX_HOME LD_PRELOAD; export LD_LIBRARY_PATH=")
                     .append(shellQuote(privateLibraryPath)).append("; ")
                 append("export PS1='root@codex:\\w# '; exec ")
-                    .append(shellQuote(paths.bash.absolutePath)).append(" -i")
+                    .append(paths.commandFor(paths.bash, listOf("-i")).joinToString(" ", transform = ::shellQuote))
             }
             executable = su.absolutePath
             // This is a fixed su operation; paths are shell-quoted and no user command is interpolated.
