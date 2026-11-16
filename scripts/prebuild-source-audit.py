@@ -13,7 +13,9 @@ TEXT_SUFFIXES = {
     ".py", ".sh", ".yml", ".yaml", ".json", ".properties",
     ".gradle", ".toml"
 }
-SKIP_PARTS = {".git", ".gradle", "build", ".idea", ".kotlin", "__pycache__"}
+# Third-party repositories checked out for builds are pinned and validated separately.
+# Do not fail first-party source hygiene checks because of upstream formatting choices.
+SKIP_PARTS = {".git", ".gradle", "build", ".idea", ".kotlin", "__pycache__", "vendor"}
 errors = []
 checked = 0
 

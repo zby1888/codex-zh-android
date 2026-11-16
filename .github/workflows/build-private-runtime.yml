@@ -8,7 +8,6 @@ on:
       - "runtime/private-runtime-config.json"
       - "scripts/prepare-private-runtime-source.py"
       - "scripts/validate-private-runtime-bootstrap.py"
-      - "scripts/validate-source-locks.py"
   # Documentation-only edits under runtime/ do not start the multi-hour ARM64 build.
   pull_request:
     branches: [main]
@@ -17,7 +16,6 @@ on:
       - "runtime/private-runtime-config.json"
       - "scripts/prepare-private-runtime-source.py"
       - "scripts/validate-private-runtime-bootstrap.py"
-      - "scripts/validate-source-locks.py"
   workflow_dispatch:
 
 permissions:
