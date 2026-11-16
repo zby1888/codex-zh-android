@@ -146,8 +146,10 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
         val bytes=value.toByteArray(Charsets.UTF_8)
         scope.launch {
             try {
-                val written=nativeMutex.withLock { bridge.nativeWrite(current,bytes) }
-                if(written!=bytes.size) publishError(current,"终端输入没有完整写入")
+                val written=nativeMutex.withLock {
+                    if(handle!=current) null else bridge.nativeWrite(current,bytes)
+                } ?: return@launch
+                if(handle==current && written!=bytes.size) publishError(current,"终端输入没有完整写入")
             } catch(error:Exception) { publishError(current,error.message?:"终端写入失败") }
         }
     }

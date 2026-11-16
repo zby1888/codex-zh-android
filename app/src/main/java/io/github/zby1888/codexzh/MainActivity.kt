@@ -356,6 +356,10 @@ private fun TerminalKeyButton(label: String, enabled: Boolean, onClick: () -> Un
 
 @Composable
 private fun TerminalSurface(frame: TerminalFrame) {
+    // Reuse native Typeface instances. Creating one per terminal cell caused
+    // thousands of native allocations on every Compose redraw, stressing HWUI/Mali.
+    val regularTypeface = remember { Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL) }
+    val italicTypeface = remember { Typeface.create(Typeface.MONOSPACE, Typeface.ITALIC) }
     Canvas(Modifier.fillMaxSize().padding(4.dp)) {
         if (frame.rows <= 0 || frame.columns <= 0) return@Canvas
         val cellWidth = size.width / frame.columns
@@ -386,11 +390,10 @@ private fun TerminalSurface(frame: TerminalFrame) {
                 paint.isFakeBoldText = (cell.flags and 1) != 0
                 paint.isUnderlineText = (cell.flags and (1 shl 2)) != 0
                 paint.isStrikeThruText = (cell.flags and (1 shl 4)) != 0
-                paint.typeface = Typeface.create(
-                    Typeface.MONOSPACE,
-                    if ((cell.flags and (1 shl 1)) != 0) Typeface.ITALIC else Typeface.NORMAL
-                )
-                if (cell.text.isNotEmpty() && cell.width > 0) {
+                paint.typeface = if ((cell.flags and (1 shl 1)) != 0) italicTypeface else regularTypeface
+                // A blank cell is already represented by its background; drawing
+                // thousands of space glyphs adds no visible information.
+                if (cell.text.isNotEmpty() && cell.text != " " && cell.width > 0) {
                     drawContext.canvas.nativeCanvas.drawText(cell.text, left, top + baselineOffset, paint)
                 }
             }

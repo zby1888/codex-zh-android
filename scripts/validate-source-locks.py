@@ -78,6 +78,18 @@ if "reinterpret_cast<Terminal*>(handle)" in native_pty:
     raise SystemExit("Raw native PTY pointers must never cross the JNI handle boundary")
 if "removeTerminal(handle)" not in native_pty or "term->closing=true" not in native_pty:
     raise SystemExit("Native PTY close must revoke handles before freeing PTY resources")
+
+if "if(handle!=current) null else bridge.nativeWrite(current,bytes)" not in pty_session:
+    raise SystemExit("PTY writes must revalidate a captured handle after acquiring the native mutex")
+main_activity = (path.parent.parent / "app" / "src" / "main" / "java" / "io" / "github" / "zby1888" / "codexzh" / "MainActivity.kt").read_text(encoding="utf-8")
+terminal_surface = main_activity.split("private fun TerminalSurface(frame: TerminalFrame) {", 1)[1].split("@Composable", 1)[0]
+if "val regularTypeface = remember" not in terminal_surface or "val italicTypeface = remember" not in terminal_surface:
+    raise SystemExit("Terminal renderer must cache both typefaces outside the cell loop")
+cell_loop = terminal_surface.split("frame.cells.forEachIndexed", 1)[-1]
+if "Typeface.create(" in cell_loop:
+    raise SystemExit("Terminal renderer must not allocate Typeface objects per cell")
+if 'cell.text != " "' not in cell_loop:
+    raise SystemExit("Terminal renderer should skip painting blank cells")
 target_sdk = re.search(r"targetSdk\s*=\s*(\d+)", app_gradle)
 if target_sdk and int(target_sdk.group(1)) >= 29:
     for required in (
