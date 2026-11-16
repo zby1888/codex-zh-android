@@ -74,12 +74,12 @@ internal object CrashLogManager {
                     info.traceInputStream?.use { readLimited(it, MAX_TRACE_BYTES) }
                 } catch (_: Exception) { null }
 
-                val traceFile = if (!trace.isNullOrEmpty()) {
+                val traceFile = trace?.takeIf { it.isNotEmpty() }?.let { traceBytes ->
                     val suffix = if (info.reason == EXIT_NATIVE_CRASH) "tombstone.pb" else "trace"
                     File(logDirectory(context), "$base.$suffix").also {
-                        runCatching { writeAtomically(it, trace) }
+                        runCatching { writeAtomically(it, traceBytes) }
                     }.takeIf { it.exists() }
-                } else null
+                }
 
                 val report = buildString {
                     appendLine("Codex Android process exit report")
@@ -88,7 +88,6 @@ internal object CrashLogManager {
                     appendLine("process=${safeText(info.processName, 160)}")
                     appendLine("pid=${info.pid}")
                     appendLine("reason=${reasonName(info.reason)} (${info.reason})")
-                    appendLine("subreason=${info.subReason}")
                     appendLine("status=${info.status}")
                     appendLine("importance=${info.importance}")
                     appendLine("pss_kb=${info.pss}")
