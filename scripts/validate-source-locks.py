@@ -51,11 +51,11 @@ installer = (path.parent.parent / "app" / "src" / "main" / "java" / "io" / "gith
 archive_validator = (path.parent.parent / "scripts" / "validate-private-runtime-bootstrap.py").read_text(encoding="utf-8")
 for limit_name in ("MAX_ENTRY_BYTES", "MAX_TOTAL_BYTES"):
     kotlin_limit = re.search(
-        rf"{limit_name}\s*=\s*(\d+)L\s*\\*\s*1024L\s*\\*\s*1024L",
+        rf"{limit_name}\s*=\s*(\d+)L\s*\*\s*1024L\s*\*\s*1024L",
         installer,
     )
     python_limit = re.search(
-        rf"^{limit_name}\s*=\s*(\d+)\s*\\*\s*1024\s*\\*\s*1024\s*$",
+        rf"^{limit_name}\s*=\s*(\d+)\s*\*\s*1024\s*\*\s*1024\s*$",
         archive_validator,
         re.MULTILINE,
     )
