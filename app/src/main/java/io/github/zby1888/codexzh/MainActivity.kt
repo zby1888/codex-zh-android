@@ -167,7 +167,7 @@ private fun CodexZhApp() {
             ) { padding ->
                 AnimatedContent(
                     targetState = tab,
-                    modifier = Modifier.fillMaxSize().padding(padding),
+                    modifier = Modifier.fillMaxSize(),
                     transitionSpec = {
                         val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
                         (fadeIn(tween(190)) +
@@ -180,20 +180,20 @@ private fun CodexZhApp() {
                     savedPageState.SaveableStateProvider(destination.name) {
                         when (destination) {
                             Tab.Chat -> CodexChatScreen(
-                                modifier = Modifier.fillMaxSize(),
+                                modifier = Modifier.padding(padding),
                                 state = chatState,
                                 onOpenProviders = { tab = Tab.Providers },
                                 onOpenMcp = { tab = Tab.Mcp },
                                 onOpenTerminal = { tab = Tab.Terminal }
                             )
                             Tab.Terminal -> TerminalScreen(
-                                Modifier.fillMaxSize(), chatState, runtimeManager, runtimeInstaller, terminalSession
+                                Modifier.padding(padding), chatState, runtimeManager, runtimeInstaller, terminalSession
                             )
-                            Tab.Providers -> ProviderScreen(Modifier.fillMaxSize())
-                            Tab.Mcp -> CodexMcpScreen(Modifier.fillMaxSize(), chatState) {
+                            Tab.Providers -> ProviderScreen(Modifier.padding(padding))
+                            Tab.Mcp -> CodexMcpScreen(Modifier.padding(padding), chatState) {
                                 tab = Tab.Providers
                             }
-                            Tab.Diagnostics -> CrashLogScreen(Modifier.fillMaxSize())
+                            Tab.Diagnostics -> CrashLogScreen(Modifier.padding(padding))
                         }
                     }
                 }
