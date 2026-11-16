@@ -28,6 +28,8 @@ constexpr jint kRunning=INT32_MIN;
 struct Terminal {
     int master=-1; pid_t child=-1; int rows=24,columns=80;
     VTerm* vt=nullptr; VTermScreen* screen=nullptr;
+    // libvterm retains this pointer; it must outlive the VTermScreen.
+    VTermScreenCallbacks screenCallbacks{};
     bool cursorVisible=true,reaped=false,closing=false;
     int exitCode=0;
     std::mutex mutex;
@@ -240,8 +242,11 @@ Java_io_github_zby1888_codexzh_NativePtyBridge_nativeCreate(
     terminal->screen=vterm_obtain_screen(terminal->vt);
     vterm_screen_enable_altscreen(terminal->screen,1);
     vterm_screen_set_damage_merge(terminal->screen,VTERM_DAMAGE_ROW);
-    VTermScreenCallbacks callbacks{};callbacks.settermprop=termProperty;
-    vterm_screen_set_callbacks(terminal->screen,&callbacks,terminal.get());
+    // vterm_screen_set_callbacks stores (does not copy) the callbacks pointer.
+    // Keep it inside Terminal so it remains valid until vterm_free().
+    terminal->screenCallbacks={};
+    terminal->screenCallbacks.settermprop=termProperty;
+    vterm_screen_set_callbacks(terminal->screen,&terminal->screenCallbacks,terminal.get());
     vterm_screen_reset(terminal->screen,1);
     try {
         const jlong handle=registerTerminal(terminal);
