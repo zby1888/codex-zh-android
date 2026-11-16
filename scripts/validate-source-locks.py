@@ -55,16 +55,7 @@ if not version or version.group(1) != config.get("codexVersion"):
 if "jq" not in base_set and ("paths.jq.exists()" in runtime_manager or "paths.jq" in installer):
     raise SystemExit("Optional jq package is incorrectly treated as a base runtime requirement")
 
-prepare_script = (path.parent / "prepare-private-runtime-source.py").read_text(encoding="utf-8")
-runtime_workflow = (path.parent.parent / ".github" / "workflows" / "build-private-runtime.yml").read_text(encoding="utf-8")
-if '"${TERMUX_BUILT_DEBS_DIRECTORY}/bootstrap-dist/"' not in prepare_script:
-    raise SystemExit("Bootstrap archive must be written under the AppArmor-writable Termux output directory")
-if "vendor/termux-packages/output/bootstrap-dist/bootstrap-aarch64.zip" not in runtime_workflow:
-    raise SystemExit("Runtime workflow must collect the bootstrap from the Termux output directory")
-if "test -w /home/builder/termux-packages/output/bootstrap-dist" not in runtime_workflow:
-    raise SystemExit("Runtime workflow must preflight the bootstrap output directory inside the builder")
-
-prepare_script = (path.parent / "prepare-private-runtime-source.py").read_text(encoding="utf-8")
+prepare_script = (path.parent.parent / "scripts" / "prepare-private-runtime-source.py").read_text(encoding="utf-8")
 runtime_workflow = (path.parent.parent / ".github" / "workflows" / "build-private-runtime.yml").read_text(encoding="utf-8")
 if '"${TERMUX_BUILT_DEBS_DIRECTORY}/bootstrap-dist/"' not in prepare_script:
     raise SystemExit("Bootstrap archive must be written under the AppArmor-writable Termux output directory")
