@@ -141,7 +141,6 @@ internal class CodexChatUiState {
     var selectedModelId by mutableStateOf<String?>(null)
     var selectedReasoningEffort by mutableStateOf<String?>(null)
     var isWorking by mutableStateOf(false)
-    var activityRevision by mutableStateOf(0)
     var isSubmitting by mutableStateOf(false)
     var status by mutableStateOf("尚未连接 Codex")
     var error by mutableStateOf<String?>(null)
@@ -153,7 +152,24 @@ internal class CodexChatUiState {
     private val mainHandler = Handler(Looper.getMainLooper())
     val appServerListener = object : CodexAppServerClient.Listener {
         override fun onNotification(message: JSONObject) {
-            mainHandler.post { applyNotification(message) }
+            mainHandler.post {
+                applyNotification(message)
+                if (message.optString("method") == "turn/completed") {
+                    val params = message.optJSONObject("params") ?: JSONObject()
+                    val turn = params.optJSONObject("turn") ?: JSONObject()
+                    val turnId = turn.optString("id")
+                    val items = turn.optJSONArray("items") ?: JSONArray()
+                    val hasFinalAssistantText = (0 until items.length()).any { index ->
+                        val item = items.optJSONObject(index) ?: return@any false
+                        item.optString("type") == "agentMessage" &&
+                            item.optString("text").isNotBlank()
+                    }
+                    val thread = params.optString("threadId")
+                    if (!hasFinalAssistantText && thread.isNotBlank() && turnId.isNotBlank()) {
+                        requestFinalItems(thread, turnId)
+                    }
+                }
+            }
         }
 
         override fun onServerRequest(message: JSONObject) {
@@ -417,12 +433,45 @@ internal class CodexChatUiState {
         ).filterNotNull().joinToString("\n").takeIf { it.isNotBlank() }
     }
 
-    fun applyNotification(message: JSONObject) {
-        activityRevision += 1
-        if (error?.startsWith("消息已提交，但连续 60 秒") == true) {
-            error = null
-            status = "Codex 已恢复活动"
+    fun appendListedTurnItems(response: JSONObject) {
+        val data = response.optJSONArray("data") ?: return
+        for (index in 0 until data.length()) {
+            val entry = data.optJSONObject(index) ?: continue
+            val item = entry.optJSONObject("item") ?: continue
+            handleItem(item, started = false)
         }
+    }
+
+    private fun requestFinalItems(threadId: String, turnId: String) {
+        val agent = controller ?: return
+        Thread({
+            runCatching {
+                agent.listItems(threadId, turnId = turnId, limit = 200, sortDirection = "asc")
+            }.onSuccess { response ->
+                mainHandler.post {
+                    if (this.threadId == threadId) {
+                        appendListedTurnItems(response)
+                        if (entries.none { !it.isUser && !it.isActivity && it.text.isNotBlank() }) {
+                            error = "服务端已结束本轮，但没有返回助手正文。请检查服务商 Responses API 实际返回内容。"
+                            status = "本轮已结束，但没有可显示的回复"
+                        } else {
+                            error = null
+                            status = "已从会话记录同步最终回复"
+                        }
+                    }
+                }
+            }.onFailure { failure ->
+                mainHandler.post {
+                    if (this.threadId == threadId &&
+                        entries.none { !it.isUser && !it.isActivity && it.text.isNotBlank() }) {
+                        error = "本轮已结束，但读取最终消息失败：${failure.message ?: "未知错误"}"
+                    }
+                }
+            }
+        }, "codex-final-items-sync").apply { isDaemon = true }.start()
+    }
+
+    fun applyNotification(message: JSONObject) {
         val method = message.optString("method")
         val params = message.optJSONObject("params") ?: JSONObject()
         val eventThreadId = params.optString("threadId")
@@ -1076,6 +1125,18 @@ internal fun CodexChatScreen(
                     when (lastStatus) {
                         "completed", "failed", "interrupted" -> {
                             state.appendCompletedTurnItems(turn)
+                            val items = turn.optJSONArray("items") ?: JSONArray()
+                            val hasAssistantText = (0 until items.length()).any { index ->
+                                val item = items.optJSONObject(index) ?: return@any false
+                                item.optString("type") == "agentMessage" &&
+                                    item.optString("text").isNotBlank()
+                            }
+                            if (!hasAssistantText && lastStatus == "completed") {
+                                val listed = withContext(Dispatchers.IO) {
+                                    agent.listItems(threadId, turnId = turnId, limit = 200, sortDirection = "asc")
+                                }
+                                state.appendListedTurnItems(listed)
+                            }
                             state.isWorking = false
                             state.activeTurnId = null
                             val failure = state.describeTurnError(turn)
@@ -1152,7 +1213,6 @@ internal fun CodexChatScreen(
                 } else {
                     val cwd = state.workingDirectory ?: defaultWorkspace(runtimeManager.paths.home)
                     state.isWorking = true
-                    val revisionBeforeStart = state.activityRevision
                     val turn = withContext(Dispatchers.IO) {
                         agent.startTurn(
                             threadId,
@@ -1166,24 +1226,6 @@ internal fun CodexChatScreen(
                     state.status = "消息已提交，正在等待 Codex 回复"
                     monitorTurn(agent, threadId, turn.id)
 
-                    // A successful turn/start acknowledgement does not guarantee that
-                    // a third-party relay will stream events. Surface an inactivity
-                    // warning rather than leaving the user with a silent chat.
-                    scope.launch {
-                        var lastRevision = revisionBeforeStart
-                        repeat(3) {
-                            delay(60_000L)
-                            if (!state.isWorking || state.activeTurnId != turn.id) return@launch
-                            val currentRevision = state.activityRevision
-                            if (currentRevision == lastRevision) {
-                                state.error =
-                                    "消息已提交，但连续 60 秒没有收到新的执行事件。请检查网络，以及中转站是否兼容 Codex Responses API 的流式事件和工具调用。"
-                                state.status = "等待服务端响应时间过长"
-                                return@launch
-                            }
-                            lastRevision = currentRevision
-                        }
-                    }
                 }
             } catch (error: Exception) {
                 state.isWorking = false
