@@ -63,6 +63,7 @@ for path in sorted(ROOT.rglob("*")):
 # Cross-file regression guards for the terminal, composer and native callback lifetime.
 chat = (ROOT / "app/src/main/java/io/github/zby1888/codexzh/CodexChatScreen.kt").read_text()
 main = (ROOT / "app/src/main/java/io/github/zby1888/codexzh/MainActivity.kt").read_text()
+installer = (ROOT / "app/src/main/java/io/github/zby1888/codexzh/RuntimeBootstrapInstaller.kt").read_text()
 native = (ROOT / "app/src/main/cpp/native_pty_terminal.cpp").read_text()
 if "enter_sends_message" not in chat or "ImeAction.Default" not in chat or "ImeAction.Send" not in chat:
     errors.append("CodexChatScreen.kt: Enter-send/newline preference is missing")
@@ -101,6 +102,22 @@ if "VTermScreenCallbacks screenCallbacks{}" not in native or "&terminal->screenC
     errors.append("native_pty_terminal.cpp: libvterm callback lifetime regression")
 if "VTermScreenCallbacks callbacks{}" in native:
     errors.append("native_pty_terminal.cpp: stack-local callback struct is forbidden")
+
+
+if "RuntimeOnboardingScreen(" not in main or "runtimeInstaller.install {" not in main:
+    errors.append("MainActivity.kt: first-launch onboarding must install the bundled runtime before entering the app")
+if "AnimatedContent(" not in main or "rememberSaveableStateHolder()" not in main:
+    errors.append("MainActivity.kt: page transitions must be animated and preserve saveable page state")
+if "fun install(onProgress: (RuntimeInstallProgress) -> Unit = {})" not in installer:
+    errors.append("RuntimeBootstrapInstaller.kt: onboarding install progress callback is missing")
+if "正在校验内置文件" not in installer or "已处理 $entryCount 项文件" not in installer:
+    errors.append("RuntimeBootstrapInstaller.kt: install stages must report truthful progress")
+if 'appendCommandOutput(itemId, params.optString("delta"))' not in chat:
+    errors.append("CodexChatScreen.kt: command output deltas must be attached to their activity row")
+if "if (isActivity && text.isBlank()) return" not in chat or '"未知操作"' in chat:
+    errors.append("CodexChatScreen.kt: empty/generic execution placeholders must not appear")
+if "val preview = lines.firstOrNull()" not in chat or ".clickable { expanded = !expanded }" not in chat:
+    errors.append("CodexChatScreen.kt: execution details must be compact and expandable")
 
 if errors:
     print("PREBUILD SOURCE AUDIT FAILED")

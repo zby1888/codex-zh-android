@@ -3,6 +3,7 @@ package io.github.zby1888.codexzh
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -53,6 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -280,7 +282,23 @@ internal class CodexChatUiState {
         }
     }
 
+    fun appendCommandOutput(itemId: String, delta: String) {
+        if (delta.isEmpty()) return
+        val entryId = "command:$itemId"
+        val index = entries.indexOfFirst { it.id == entryId }
+        val current = if (index >= 0) entries[index] else null
+        val oldText = current?.text.orEmpty()
+        val marker = "\n\n输出：\n"
+        val splitAt = oldText.indexOf(marker)
+        val summary = if (splitAt >= 0) oldText.substring(0, splitAt) else oldText
+        val previousOutput = if (splitAt >= 0) oldText.substring(splitAt + marker.length) else ""
+        val nextText = (summary.ifBlank { "命令执行中" }) + marker + previousOutput + delta
+        val next = CodexChatEntry(entryId, "命令执行", nextText, isActivity = true)
+        if (index >= 0) entries[index] = next else entries.add(next)
+    }
+
     fun upsert(id: String, title: String, text: String, isActivity: Boolean = false) {
+        if (isActivity && text.isBlank()) return
         val index = entries.indexOfFirst { it.id == id }
         val next = if (index < 0) CodexChatEntry(id, title, text, isActivity = isActivity)
         else entries[index].copy(title = title, text = text, isActivity = isActivity)
@@ -545,7 +563,7 @@ internal class CodexChatUiState {
             }
             "item/commandExecution/outputDelta" -> {
                 val itemId = params.optString("itemId")
-                append("command:$itemId", "命令输出", params.optString("delta"), true)
+                appendCommandOutput(itemId, params.optString("delta"))
             }
             "item/started" -> handleItem(params.optJSONObject("item"), started = true)
             "item/completed" -> handleItem(params.optJSONObject("item"), started = false)
@@ -607,20 +625,34 @@ internal class CodexChatUiState {
             "commandExecution" -> {
                 val command = item.optString("command")
                 val cwd = item.optString("cwd")
-                val state = item.optString("status").ifBlank {
+                val rawState = item.optString("status").ifBlank {
                     if (started) "inProgress" else "completed"
                 }
-                val output = item.optString("aggregatedOutput")
-                val details = buildString {
-                    append(command.ifBlank { "正在执行命令" })
-                    if (cwd.isNotBlank()) append("\n目录：").append(cwd)
-                    append("\n状态：").append(state)
-                    item.optInt("exitCode", Int.MIN_VALUE).takeIf { it != Int.MIN_VALUE }?.let {
-                        append("\n退出码：").append(it)
-                    }
-                    if (output.isNotBlank()) append("\n\n").append(output)
+                val state = when (rawState) {
+                    "inProgress", "running" -> "执行中"
+                    "completed", "succeeded" -> "已完成"
+                    "failed" -> "失败"
+                    "declined" -> "已拒绝"
+                    "interrupted" -> "已中断"
+                    else -> rawState
                 }
-                upsert("command:$id", "命令执行", details, true)
+                val previousText = entries.firstOrNull { it.id == "command:$id" }?.text.orEmpty()
+                val outputMarker = "\n\n输出：\n"
+                val streamedOutput = previousText.substringAfter(outputMarker, "")
+                val output = item.optString("aggregatedOutput").ifBlank { streamedOutput }
+                val exitCode = item.optInt("exitCode", Int.MIN_VALUE)
+                if (command.isNotBlank() || cwd.isNotBlank() || rawState.isNotBlank() ||
+                    output.isNotBlank() || exitCode != Int.MIN_VALUE
+                ) {
+                    val details = buildString {
+                        append(command.ifBlank { "命令执行" })
+                        if (cwd.isNotBlank()) append("\n目录：").append(cwd)
+                        if (state.isNotBlank()) append("\n状态：").append(state)
+                        if (exitCode != Int.MIN_VALUE) append("\n退出码：").append(exitCode)
+                        if (output.isNotBlank()) append(outputMarker).append(output)
+                    }
+                    upsert("command:$id", "命令执行", details, true)
+                }
             }
             "fileChange" -> {
                 val changes = item.optJSONArray("changes")
@@ -632,28 +664,30 @@ internal class CodexChatUiState {
                         }
                     }
                 }.filter { it.isNotBlank() }
-                upsert(
-                    "file:$id",
-                    "文件修改",
-                    if (paths.isEmpty()) "文件修改状态：${item.optString("status")}"
-                    else paths.joinToString("\n"),
-                    true
-                )
+                val fileStatus = item.optString("status")
+                if (paths.isNotEmpty() || fileStatus.isNotBlank()) {
+                    val details = if (paths.isEmpty()) "文件修改 · $fileStatus"
+                        else paths.joinToString("\n")
+                    upsert("file:$id", "文件修改", details, true)
+                }
             }
-            "mcpToolCall" -> upsert(
-                "mcp:$id",
-                "MCP 工具",
-                "${item.optString("server")} / ${item.optString("tool")}\n状态：${item.optString("status")}",
-                true
-            )
+            "mcpToolCall" -> {
+                val server = item.optString("server")
+                val tool = item.optString("tool")
+                val state = item.optString("status")
+                if (server.isNotBlank() || tool.isNotBlank() || state.isNotBlank()) {
+                    val details = listOf(
+                        listOf(server, tool).filter { it.isNotBlank() }.joinToString(" / "),
+                        state.takeIf { it.isNotBlank() }?.let { "状态：$it" }
+                    ).filterNotNull().filter { it.isNotBlank() }.joinToString("\n")
+                    upsert("mcp:$id", "MCP 工具", details, true)
+                }
+            }
             "plan" -> {
                 val text = item.optString("text")
                 if (text.isNotBlank()) upsert("plan:$id", "执行计划", text, true)
             }
-            else -> {
-                val type = item.optString("type").ifBlank { "未知操作" }
-                if (started) upsert("item:$id", "执行步骤", type, true)
-            }
+            else -> Unit
         }
     }
 }
@@ -2039,7 +2073,7 @@ internal fun CodexChatScreen(
             if (state.entries.isEmpty()) {
                 item {
                     Text(
-                        "这里会显示 Codex 的回复、执行步骤、命令输出和文件变更。\n首次使用前，请先安装私有运行环境并配置 Responses API 服务商。",
+                        "这里会显示 Codex 的回复、命令执行和文件变更。\n首次启动环境准备完成后，先在服务商设置中添加 Responses API 兼容的服务商。",
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }
@@ -2067,27 +2101,60 @@ internal fun CodexChatScreen(
                     }
                     entry.isActivity -> {
                         var expanded by remember(entry.id) { mutableStateOf(false) }
+                        val lines = entry.text.lineSequence().map { it.trim() }
+                            .filter { it.isNotBlank() }.toList()
+                        val preview = lines.firstOrNull().orEmpty()
+                        val statusLine = lines.firstOrNull { it.startsWith("状态：") }
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            shape = RoundedCornerShape(14.dp)
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.38f),
+                            shape = RoundedCornerShape(10.dp)
                         ) {
-                            Column(Modifier.padding(10.dp)) {
-                                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Column(
+                                Modifier.fillMaxWidth()
+                                    .clickable { expanded = !expanded }
+                                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                                ) {
                                     Text(
                                         entry.title,
-                                        modifier = Modifier.weight(1f),
-                                        style = MaterialTheme.typography.labelLarge,
+                                        style = MaterialTheme.typography.labelMedium,
                                         fontWeight = FontWeight.SemiBold
                                     )
-                                    TextButton(onClick = { expanded = !expanded }) {
-                                        Text(if (expanded) "收起" else "详情")
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        preview,
+                                        modifier = Modifier.weight(1f),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (statusLine != null) {
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            statusLine.removePrefix("状态："),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
+                                    Text(
+                                        if (expanded) "⌃" else "⌄",
+                                        modifier = Modifier.padding(start = 6.dp),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
-                                Text(
-                                    if (expanded || entry.text.length <= 220) entry.text else entry.text.take(220) + "…",
-                                    style = MaterialTheme.typography.bodySmall
-                                )
+                                if (expanded) {
+                                    Text(
+                                        entry.text,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         }
                     }
