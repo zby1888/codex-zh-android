@@ -345,9 +345,9 @@ internal class RuntimeBootstrapInstaller(
         private const val MANIFEST_ASSET = "runtime/bootstrap-manifest.json"
         private const val SYMLINKS_FILE = "SYMLINKS.txt"
         private const val MAX_ENTRIES = 80_000
-        private const val MAX_ENTRY_BYTES = 128L * 1024L * 1024L
+        private const val MAX_ENTRY_BYTES = 256L * 1024L * 1024L
         private const val MAX_SYMLINK_BYTES = 4L * 1024L * 1024L
-        private const val MAX_TOTAL_BYTES = 512L * 1024L * 1024L
+        private const val MAX_TOTAL_BYTES = 768L * 1024L * 1024L
         private const val MODE_0700 = 0x1C0
         private const val MODE_0600 = 0x180
     }
