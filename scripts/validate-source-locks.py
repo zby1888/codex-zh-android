@@ -71,6 +71,13 @@ if "jq" not in base_set and ("paths.jq.exists()" in runtime_manager or "paths.jq
 runtime_paths = (path.parent.parent / "app" / "src" / "main" / "java" / "io" / "github" / "zby1888" / "codexzh" / "RuntimePaths.kt").read_text(encoding="utf-8")
 app_server = (path.parent.parent / "app" / "src" / "main" / "java" / "io" / "github" / "zby1888" / "codexzh" / "CodexAppServerClient.kt").read_text(encoding="utf-8")
 pty_session = (path.parent.parent / "app" / "src" / "main" / "java" / "io" / "github" / "zby1888" / "codexzh" / "PtyTerminalSession.kt").read_text(encoding="utf-8")
+native_pty = (path.parent.parent / "app" / "src" / "main" / "cpp" / "native_pty_terminal.cpp").read_text(encoding="utf-8")
+if "std::unordered_map<jlong,std::shared_ptr<Terminal>> gTerminals" not in native_pty:
+    raise SystemExit("Native PTY handles must be held by the lifetime-safe registry")
+if "reinterpret_cast<Terminal*>(handle)" in native_pty:
+    raise SystemExit("Raw native PTY pointers must never cross the JNI handle boundary")
+if "removeTerminal(handle)" not in native_pty or "term->closing=true" not in native_pty:
+    raise SystemExit("Native PTY close must revoke handles before freeing PTY resources")
 target_sdk = re.search(r"targetSdk\s*=\s*(\d+)", app_gradle)
 if target_sdk and int(target_sdk.group(1)) >= 29:
     for required in (
