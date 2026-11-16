@@ -400,6 +400,23 @@ internal class CodexChatUiState {
         }
     }
 
+    fun appendCompletedTurnItems(turn: JSONObject) {
+        val items = turn.optJSONArray("items") ?: return
+        for (index in 0 until items.length()) {
+            val item = items.optJSONObject(index) ?: continue
+            handleItem(item, started = false)
+        }
+    }
+
+    fun describeTurnError(turn: JSONObject): String? {
+        val turnError = turn.optJSONObject("error") ?: return null
+        return listOf(
+            turnError.optString("message").takeIf { it.isNotBlank() },
+            turnError.optString("additionalDetails").takeIf { it.isNotBlank() },
+            turnError.opt("codexErrorInfo")?.toString()?.takeIf { it.isNotBlank() }
+        ).filterNotNull().joinToString("\n").takeIf { it.isNotBlank() }
+    }
+
     fun applyNotification(message: JSONObject) {
         activityRevision += 1
         if (error?.startsWith("消息已提交，但连续 60 秒") == true) {
@@ -408,6 +425,8 @@ internal class CodexChatUiState {
         }
         val method = message.optString("method")
         val params = message.optJSONObject("params") ?: JSONObject()
+        val eventThreadId = params.optString("threadId")
+        if (eventThreadId.isNotBlank() && threadId != null && eventThreadId != threadId) return
         when (method) {
             "mcpServer/oauthLogin/completed" -> {
                 val name = params.optString("name")
@@ -425,21 +444,26 @@ internal class CodexChatUiState {
                 val turn = params.optJSONObject("turn") ?: JSONObject()
                 activeTurnId = turn.optString("id").takeIf { it.isNotBlank() }
                 isWorking = true
-                status = "Codex 正在处理任务"
+                error = null
+                status = "Codex 已开始执行任务"
             }
             "turn/completed" -> {
                 val turn = params.optJSONObject("turn") ?: JSONObject()
+                // The pinned 0.169.0 Turn payload includes canonical final items.
+                appendCompletedTurnItems(turn)
                 val result = turn.optString("status").ifBlank { "completed" }
-                val failure = turn.optJSONObject("error")?.optString("message")
-                    ?.takeIf { it.isNotBlank() }
-                    ?: turn.optString("error").takeIf { it.isNotBlank() }
+                val failure = describeTurnError(turn)
                 isWorking = false
                 activeTurnId = null
                 if (result == "failed") {
-                    error = failure ?: "Codex 本轮执行失败；请检查服务商配置和运行诊断"
+                    error = failure ?: "Codex 本轮执行失败；请检查服务商和 API 兼容性"
+                } else if (result == "completed") {
+                    error = null
                 }
                 status = when (result) {
-                    "completed" -> "本轮已完成"
+                    "completed" -> if (entries.none {
+                        !it.isUser && !it.isActivity && it.text.isNotBlank()
+                    }) "服务端已完成本轮，但没有返回可显示的助手正文" else "本轮已完成"
                     "interrupted" -> "任务已中断"
                     "failed" -> "任务执行失败"
                     else -> "本轮结束：$result"
@@ -1026,6 +1050,70 @@ internal fun CodexChatScreen(
         state.status = "准备开始新会话"
     }
 
+    fun monitorTurn(agent: CodexAgentController, threadId: String, turnId: String) {
+        scope.launch {
+            var lastStatus = "inProgress"
+            var queryFailure: String? = null
+            repeat(15) {
+                delay(4_000L)
+                if (state.threadId != threadId || state.activeTurnId != turnId || !state.isWorking) {
+                    return@launch
+                }
+                try {
+                    val response = withContext(Dispatchers.IO) {
+                        agent.listTurns(threadId, limit = 10, sortDirection = "desc")
+                    }
+                    val data = response.optJSONArray("data") ?: JSONArray()
+                    val turn = (0 until data.length())
+                        .mapNotNull { data.optJSONObject(it) }
+                        .firstOrNull { it.optString("id") == turnId }
+                    if (turn == null) {
+                        state.status = "消息已提交，正在核对服务端执行记录…"
+                        return@repeat
+                    }
+                    lastStatus = turn.optString("status").ifBlank { "inProgress" }
+                    queryFailure = null
+                    when (lastStatus) {
+                        "completed", "failed", "interrupted" -> {
+                            state.appendCompletedTurnItems(turn)
+                            state.isWorking = false
+                            state.activeTurnId = null
+                            val failure = state.describeTurnError(turn)
+                            if (lastStatus == "failed") {
+                                state.error = failure ?: "本轮已失败，但服务端没有提供具体错误信息"
+                                state.status = "任务执行失败"
+                            } else {
+                                state.error = null
+                                state.status = when (lastStatus) {
+                                    "completed" -> if (state.entries.none {
+                                        !it.isUser && !it.isActivity && it.text.isNotBlank()
+                                    }) "服务端已完成本轮，但没有返回可显示的助手正文"
+                                    else "已从服务端会话记录同步最终回复"
+                                    else -> "任务已中断"
+                                }
+                            }
+                            return@launch
+                        }
+                        else -> {
+                            state.error = null
+                            state.status = "Codex 正在执行（服务端状态：$lastStatus）"
+                        }
+                    }
+                } catch (error: Exception) {
+                    queryFailure = error.message ?: "未知错误"
+                    state.error = "已提交消息，但读取服务端执行状态失败：$queryFailure"
+                    state.status = "无法确认 Codex 是否正在执行"
+                }
+            }
+            if (state.threadId == threadId && state.activeTurnId == turnId && state.isWorking) {
+                state.error = queryFailure?.let {
+                    "已提交消息，但连续查询服务端状态失败：$it"
+                } ?: "服务端仍未结束本轮（状态：$lastStatus），客户端没有收到最终回复。请检查中转站的 Responses API 流式兼容性。"
+                state.status = "等待服务端回复超时"
+            }
+        }
+    }
+
     fun connectAndSend(text: String) {
         if (state.isSubmitting || text.isBlank()) return
         scope.launch {
@@ -1076,6 +1164,7 @@ internal fun CodexChatScreen(
                     }
                     if (state.isWorking) state.activeTurnId = turn.id
                     state.status = "消息已提交，正在等待 Codex 回复"
+                    monitorTurn(agent, threadId, turn.id)
 
                     // A successful turn/start acknowledgement does not guarantee that
                     // a third-party relay will stream events. Surface an inactivity

@@ -80,6 +80,10 @@ if 'terminal.changeDirectory(currentWorkspace)' not in main:
     errors.append("MainActivity.kt: running terminal must retain the switch-to-current-workspace action")
 if "showRootDetails" not in main:
     errors.append("MainActivity.kt: Root controls must be collapsible")
+if "appendCompletedTurnItems(turn)" not in chat or "fun monitorTurn(" not in chat:
+    errors.append("CodexChatScreen.kt: completed turn reconciliation and history polling are missing")
+if "codexErrorInfo" not in chat or "additionalDetails" not in chat:
+    errors.append("CodexChatScreen.kt: structured Codex turn errors are not exposed")
 if "VTermScreenCallbacks screenCallbacks{}" not in native or "&terminal->screenCallbacks" not in native:
     errors.append("native_pty_terminal.cpp: libvterm callback lifetime regression")
 if "VTermScreenCallbacks callbacks{}" in native:
