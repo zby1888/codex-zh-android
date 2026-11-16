@@ -100,6 +100,10 @@ manifest = (path.parent.parent / "app" / "src" / "main" / "AndroidManifest.xml")
 for required in ("setDefaultUncaughtExceptionHandler", "getHistoricalProcessExitReasons", "traceInputStream", "tombstone.pb", "recordEvent"):
     if required not in crash_manager:
         raise SystemExit(f"Crash logger is missing required capture behavior: {required}")
+if "info.subReason" in crash_manager or "trace.isNullOrEmpty()" in crash_manager:
+    raise SystemExit("Crash logger must only use Android ApplicationExitInfo API members and handle nullable trace bytes")
+if "trace?.takeIf { it.isNotEmpty() }" not in crash_manager:
+    raise SystemExit("Crash logger must check nullable process-exit trace bytes before writing")
 if "terminal.native_create.begin" not in pty_session or "terminal.reader.started" not in pty_session:
     raise SystemExit("PTY lifecycle breadcrumbs must be written before/after native startup")
 if "CrashLogManager.install(applicationContext)" not in main_activity:
