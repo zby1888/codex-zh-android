@@ -1,11 +1,8 @@
 package io.github.zby1888.codexzh
 
-import android.graphics.Paint
-import android.graphics.Typeface
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -18,12 +15,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -356,61 +353,12 @@ private fun TerminalKeyButton(label: String, enabled: Boolean, onClick: () -> Un
 
 @Composable
 private fun TerminalSurface(frame: TerminalFrame) {
-    // Reuse native Typeface instances. Creating one per terminal cell caused
-    // thousands of native allocations on every Compose redraw, stressing HWUI/Mali.
-    val regularTypeface = remember { Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL) }
-    val italicTypeface = remember { Typeface.create(Typeface.MONOSPACE, Typeface.ITALIC) }
-    Canvas(Modifier.fillMaxSize().padding(4.dp)) {
-        if (frame.rows <= 0 || frame.columns <= 0) return@Canvas
-        val cellWidth = size.width / frame.columns
-        val cellHeight = size.height / frame.rows
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            typeface = Typeface.MONOSPACE
-            textSize = cellHeight * 0.78f
-        }
-        val metrics = paint.fontMetrics
-        val baselineOffset = (cellHeight - metrics.descent - metrics.ascent) / 2f
-
-        frame.cells.forEachIndexed { row, cells ->
-            cells.forEachIndexed { column, cell ->
-                val reverse = (cell.flags and (1 shl 3)) != 0
-                val foreground = if (reverse) cell.background else cell.foreground
-                val background = if (reverse) cell.foreground else cell.background
-                val left = column * cellWidth
-                val top = row * cellHeight
-                if (background != null) {
-                    drawRect(
-                        color = Color(android.graphics.Color.rgb((background shr 16) and 0xff, (background shr 8) and 0xff, background and 0xff)),
-                        topLeft = androidx.compose.ui.geometry.Offset(left, top),
-                        size = androidx.compose.ui.geometry.Size(cellWidth * maxOf(1, cell.width), cellHeight)
-                    )
-                }
-                paint.color = if (foreground == null) android.graphics.Color.rgb(226, 232, 240)
-                else android.graphics.Color.rgb((foreground shr 16) and 0xff, (foreground shr 8) and 0xff, foreground and 0xff)
-                paint.isFakeBoldText = (cell.flags and 1) != 0
-                paint.isUnderlineText = (cell.flags and (1 shl 2)) != 0
-                paint.isStrikeThruText = (cell.flags and (1 shl 4)) != 0
-                paint.typeface = if ((cell.flags and (1 shl 1)) != 0) italicTypeface else regularTypeface
-                // A blank cell is already represented by its background; drawing
-                // thousands of space glyphs adds no visible information.
-                if (cell.text.isNotEmpty() && cell.text != " " && cell.width > 0) {
-                    drawContext.canvas.nativeCanvas.drawText(cell.text, left, top + baselineOffset, paint)
-                }
-            }
-        }
-        if (frame.cursorVisible) {
-            val left = frame.cursorColumn * cellWidth
-            val top = frame.cursorRow * cellHeight
-            val cursorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = android.graphics.Color.argb(190, 230, 237, 243)
-                style = Paint.Style.STROKE
-                strokeWidth = 1.5f
-            }
-            drawContext.canvas.nativeCanvas.drawRect(left, top, left + cellWidth, top + cellHeight, cursorPaint)
-        }
-    }
+    AndroidView(
+        factory = { context -> TerminalSoftwareView(context).apply { updateFrame(frame) } },
+        update = { view -> view.updateFrame(frame) },
+        modifier = Modifier.fillMaxSize().padding(4.dp)
+    )
 }
-
 @Composable
 private fun ListScreen(modifier: Modifier, title: String, body: String, items: List<String>) {
     Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
