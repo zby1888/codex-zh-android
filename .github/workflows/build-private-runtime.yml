@@ -37,11 +37,11 @@ on:
 permissions:
   contents: read
 
-# Do not cancel a costly ARM64 toolchain build just because a UI/docs commit arrives.
-# A newer run for the same branch waits for the current build to finish.
+# Runtime builds are triggered only by runtime/launcher/native-PTY source paths.
+# A newer relevant source commit supersedes the older build and frees the runner.
 concurrency:
   group: private-runtime-arm64-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-arm64-bootstrap:
