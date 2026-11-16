@@ -44,7 +44,7 @@ internal class TerminalSoftwareView(context: Context) : View(context) {
         canvas.drawColor(0xFF101318.toInt())
         val cellWidth = width.toFloat() / frame.columns
         val cellHeight = height.toFloat() / frame.rows
-        textPaint.textSize = cellHeight * 0.78f
+        textPaint.textSize = cellHeight * 0.82f
         val metrics = textPaint.fontMetrics
         val baselineOffset = (cellHeight - metrics.descent - metrics.ascent) / 2f
 

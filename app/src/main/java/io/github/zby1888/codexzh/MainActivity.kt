@@ -114,11 +114,17 @@ private fun TerminalScreen(
     terminal: PtyTerminalSession
 ) {
     val context = LocalContext.current
-    var status by remember { mutableStateOf(RuntimeStatus(RuntimePhase.NOT_PREPARED, "正在检查应用私有运行环境…")) }
+    var status by remember {
+        mutableStateOf(RuntimeStatus(RuntimePhase.NOT_PREPARED, "正在检查应用私有运行环境…"))
+    }
     var busy by remember { mutableStateOf(true) }
     var command by remember { mutableStateOf("") }
     var desiredRows by remember { mutableIntStateOf(24) }
     var desiredColumns by remember { mutableIntStateOf(80) }
+    var terminalFontScale by remember { mutableFloatStateOf(1.2f) }
+    var terminalWidthPx by remember { mutableIntStateOf(0) }
+    var terminalHeightPx by remember { mutableIntStateOf(0) }
+    var showRootDetails by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val rootAccessManager = remember(context) { RootAccessManager(context) }
     var rootStatus by remember { mutableStateOf(RootAccessStatus.notChecked()) }
@@ -128,6 +134,7 @@ private fun TerminalScreen(
     val currentWorkspace = remember(chatState.workingDirectory, manager) {
         chatState.workingDirectory ?: workspaceRepository.defaultWorkspace().canonicalPath
     }
+    val density = context.resources.displayMetrics.density
 
     LaunchedEffect(manager) {
         try {
@@ -139,160 +146,147 @@ private fun TerminalScreen(
         }
     }
 
+    LaunchedEffect(terminalWidthPx, terminalHeightPx, terminalFontScale) {
+        if (terminalWidthPx > 0 && terminalHeightPx > 0) {
+            // Keep monospace cells aligned while allowing genuine font-size control.
+            val columns = (terminalWidthPx / (10.5f * density * terminalFontScale))
+                .toInt().coerceIn(20, 160)
+            val rows = (terminalHeightPx / (22f * density * terminalFontScale))
+                .toInt().coerceIn(8, 80)
+            if (columns != desiredColumns || rows != desiredRows) {
+                desiredColumns = columns
+                desiredRows = rows
+                terminal.resize(rows, columns)
+            }
+        }
+    }
+
     val actionLabel = when (status.phase) {
         RuntimePhase.UNSUPPORTED_ABI -> "设备不支持"
         RuntimePhase.NOT_PREPARED -> "准备私有目录"
-        RuntimePhase.LAYOUT_READY -> "离线安装 ARM64 工具链"
+        RuntimePhase.LAYOUT_READY -> "安装 ARM64 工具链"
         RuntimePhase.RUNTIME_READY -> "运行环境已就绪"
         RuntimePhase.ERROR -> "重试安装"
     }
 
-    Column(modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Card {
-            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("当前项目工作区", fontWeight = FontWeight.SemiBold)
-                Text(currentWorkspace, style = MaterialTheme.typography.bodySmall)
-                if (terminal.isRunning && terminal.workingDirectory != currentWorkspace) {
-                    TextButton(onClick = { terminal.changeDirectory(currentWorkspace) }) {
-                        Text("让当前终端切换到这个项目")
-                    }
-                }
-            }
-        }
-
-        Card {
-            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    Text("独立 ARM64 运行环境", modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-                    Text(status.phase.title, style = MaterialTheme.typography.labelSmall)
-                }
-                Text(status.message, style = MaterialTheme.typography.bodySmall)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                busy = true
-                                try {
-                                    status = withContext(Dispatchers.IO) {
-                                        if (status.phase == RuntimePhase.NOT_PREPARED) manager.preparePrivateDirectories()
-                                        else installer.install()
-                                    }
-                                } catch (error: Exception) {
-                                    status = RuntimeStatus(RuntimePhase.ERROR, error.message ?: "准备运行环境失败")
-                                } finally {
-                                    busy = false
-                                }
-                            }
-                        },
-                        enabled = !busy && !terminal.isRunning &&
-                            status.phase != RuntimePhase.UNSUPPORTED_ABI &&
-                            status.phase != RuntimePhase.RUNTIME_READY,
-                        modifier = Modifier.weight(1f)
-                    ) { Text(actionLabel) }
-
-                    Button(
-                        onClick = {
-                            if (terminal.isRunning) terminal.stop()
-                            else scope.launch {
-                                busy = true
-                                try {
-                                    check(status.phase == RuntimePhase.RUNTIME_READY) {
-                                        "请先安装并检查 ARM64 运行环境"
-                                    }
-                                    val validated = withContext(Dispatchers.IO) {
-                                        workspaceRepository.validate(java.io.File(currentWorkspace)).canonicalPath
-                                    }
-                                    val suPath = if (useRootShell) {
-                                        rootStatus = rootAccessManager.requestAccess()
-                                        check(rootStatus.isGranted && !rootStatus.suPath.isNullOrBlank()) {
-                                            rootStatus.message
-                                        }
-                                        rootStatus.suPath
-                                    } else null
-                                    terminal.start(validated, desiredRows, desiredColumns, rootSuPath = suPath)
-                                } catch (error: Exception) {
-                                    status = status.copy(message = error.message ?: "启动 PTY 终端失败")
-                                } finally {
-                                    busy = false
-                                }
-                            }
-                        },
-                        enabled = !busy && (terminal.isRunning || status.phase == RuntimePhase.RUNTIME_READY),
-                        modifier = Modifier.weight(1f)
-                    ) { Text(if (terminal.isRunning) "结束终端" else "启动真实终端") }
-                }
+    Column(
+        modifier.fillMaxSize().imePadding().padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        // Compact project/runtime toolbar; the terminal output owns most of the screen.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(
+                    currentWorkspace.substringAfterLast('/').ifBlank { "当前项目" },
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
+                )
                 Text(
                     if (terminal.isRunning) {
-                        (if (terminal.isRootSession) "Root PTY 已连接 · " else "PTY 已连接 · ") +
+                        (if (terminal.isRootSession) "Root PTY · " else "PTY · ") +
                             terminal.workingDirectory.orEmpty()
-                    } else terminal.message,
+                    } else {
+                        "${status.phase.title} · ${status.message}"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = if (terminal.isRunning) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
                 )
             }
-        }
-
-        Card {
-            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    Text("Root 调试通道", modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-                    Text(
-                        if (rootStatus.isGranted) "已授权" else "默认关闭",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (rootStatus.isGranted) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Text(rootStatus.message, style = MaterialTheme.typography.bodySmall)
+            if (status.phase != RuntimePhase.RUNTIME_READY) {
                 OutlinedButton(
                     onClick = {
                         scope.launch {
-                            requestingRoot = true
+                            busy = true
                             try {
-                                rootStatus = rootAccessManager.requestAccess()
-                                if (!rootStatus.isGranted) useRootShell = false
+                                status = withContext(Dispatchers.IO) {
+                                    if (status.phase == RuntimePhase.NOT_PREPARED) {
+                                        manager.preparePrivateDirectories()
+                                    } else {
+                                        installer.install()
+                                    }
+                                }
+                            } catch (error: Exception) {
+                                status = RuntimeStatus(
+                                    RuntimePhase.ERROR,
+                                    error.message ?: "准备运行环境失败"
+                                )
                             } finally {
-                                requestingRoot = false
+                                busy = false
                             }
                         }
                     },
-                    enabled = !requestingRoot && !busy && !terminal.isRunning
-                ) {
-                    Text(if (requestingRoot) "正在等待 Root 管理器…" else "申请 / 重新检查 Root 授权")
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("本次终端使用 Root 身份", fontWeight = FontWeight.Medium)
-                        Text(
-                            "只影响这个 Root 终端；Agent 凭据不会传给它。Root 在项目里新建的文件可能归 root 所有，日常改代码和构建请用 Codex Agent / 普通终端。",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = useRootShell,
-                        onCheckedChange = { useRootShell = it },
-                        enabled = rootStatus.isGranted && !busy && !terminal.isRunning
-                    )
-                }
+                    enabled = !busy && !terminal.isRunning &&
+                        status.phase != RuntimePhase.UNSUPPORTED_ABI
+                ) { Text(actionLabel) }
             }
+            Spacer(Modifier.width(6.dp))
+            Button(
+                onClick = {
+                    if (terminal.isRunning) {
+                        terminal.stop()
+                    } else {
+                        scope.launch {
+                            busy = true
+                            try {
+                                check(status.phase == RuntimePhase.RUNTIME_READY) {
+                                    "请先安装并检查 ARM64 运行环境"
+                                }
+                                val validated = withContext(Dispatchers.IO) {
+                                    workspaceRepository.validate(java.io.File(currentWorkspace)).canonicalPath
+                                }
+                                val suPath = if (useRootShell) {
+                                    rootStatus = rootAccessManager.requestAccess()
+                                    check(rootStatus.isGranted && !rootStatus.suPath.isNullOrBlank()) {
+                                        rootStatus.message
+                                    }
+                                    rootStatus.suPath
+                                } else null
+                                terminal.start(validated, desiredRows, desiredColumns, rootSuPath = suPath)
+                            } catch (error: Exception) {
+                                status = status.copy(message = error.message ?: "启动 PTY 终端失败")
+                            } finally {
+                                busy = false
+                            }
+                        }
+                    }
+                },
+                enabled = !busy && (terminal.isRunning || status.phase == RuntimePhase.RUNTIME_READY)
+            ) { Text(if (terminal.isRunning) "结束" else "启动") }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+        ) {
+            Text("终端输出", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.weight(1f))
+            Text("字号", style = MaterialTheme.typography.labelSmall)
+            TextButton(
+                onClick = { terminalFontScale = (terminalFontScale - 0.1f).coerceAtLeast(0.8f) },
+                enabled = terminalFontScale > 0.8f
+            ) { Text("A−") }
+            Text(
+                "${(terminalFontScale * 16f).toInt()}",
+                style = MaterialTheme.typography.labelMedium
+            )
+            TextButton(
+                onClick = { terminalFontScale = (terminalFontScale + 0.1f).coerceAtMost(1.8f) },
+                enabled = terminalFontScale < 1.8f
+            ) { Text("A＋") }
         }
 
         Box(
-            Modifier.weight(1f).fillMaxWidth().background(Color(0xFF101318))
+            Modifier.weight(1f).fillMaxWidth()
+                .background(Color(0xFF101318))
                 .onSizeChanged { size ->
-                    val density = context.resources.displayMetrics.density
-                    val cols = (size.width / (8.2f * density)).toInt().coerceIn(24, 120)
-                    val rows = (size.height / (18f * density)).toInt().coerceIn(8, 60)
-                    if (cols != desiredColumns || rows != desiredRows) {
-                        desiredColumns = cols
-                        desiredRows = rows
-                        terminal.resize(rows, cols)
-                    }
+                    terminalWidthPx = size.width
+                    terminalHeightPx = size.height
                 }
         ) {
             TerminalSurface(terminal.frame)
@@ -311,6 +305,60 @@ private fun TerminalScreen(
             TerminalKeyButton("←", terminal.isRunning) { terminal.sendInput("\u001b[D") }
             TerminalKeyButton("→", terminal.isRunning) { terminal.sendInput("\u001b[C") }
             TerminalKeyButton("清屏", terminal.isRunning) { terminal.sendInput("\u001b[2J\u001b[H") }
+            TextButton(onClick = { showRootDetails = !showRootDetails }) {
+                Text(if (showRootDetails) "收起 Root" else "Root 设置")
+            }
+        }
+
+        if (showRootDetails) {
+            Card {
+                Column(
+                    Modifier.fillMaxWidth().padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Text("Root 调试终端", modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (rootStatus.isGranted) "已授权" else "默认关闭",
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                    Text(rootStatus.message, style = MaterialTheme.typography.labelSmall)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch {
+                                    requestingRoot = true
+                                    try {
+                                        rootStatus = rootAccessManager.requestAccess()
+                                        if (!rootStatus.isGranted) useRootShell = false
+                                    } finally {
+                                        requestingRoot = false
+                                    }
+                                }
+                            },
+                            enabled = !requestingRoot && !busy && !terminal.isRunning
+                        ) {
+                            Text(if (requestingRoot) "等待 Root 授权…" else "申请 / 检查 Root")
+                        }
+                        Spacer(Modifier.weight(1f))
+                        Text("本次使用 Root", style = MaterialTheme.typography.bodySmall)
+                        Switch(
+                            checked = useRootShell,
+                            onCheckedChange = { useRootShell = it },
+                            enabled = rootStatus.isGranted && !busy && !terminal.isRunning
+                        )
+                    }
+                    Text(
+                        "Root 只用于独立终端，不会提升 Codex Agent。Root 创建的项目文件可能归 root 所有。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
 
         Row(
@@ -343,11 +391,6 @@ private fun TerminalScreen(
                 enabled = terminal.isRunning && command.isNotEmpty()
             ) { Text("发送") }
         }
-        Text(
-            "聊天 Agent 与 Shell PTY 使用不同进程和输入输出通道；两个页面共用当前项目目录。",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
     }
 }
 

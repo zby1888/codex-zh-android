@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   assemble-debug:
@@ -31,12 +32,79 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.10.2"
+      - name: Audit all source files before building
+        run: |
+          python3 scripts/prebuild-source-audit.py
+          python3 -m py_compile scripts/validate-source-locks.py
       - name: Assemble debug APK
         run: gradle --no-daemon :app:assembleDebug
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: codex-zh-android-debug
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Find latest successful private ARM64 runtime for this branch
+        id: runtime
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = context.payload.pull_request?.head?.ref ?? context.ref.replace(/^refs\/heads\//, "");
+            const runs = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: "build-private-runtime.yml",
+              branch,
+              status: "success",
+              per_page: 20
+            });
+            for (const run of runs.data.workflow_runs) {
+              const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: run.id,
+                per_page: 100
+              });
+              const match = artifacts.data.artifacts.find(item =>
+                item.name === "codex-zh-private-runtime-arm64" && !item.expired
+              );
+              if (match) {
+                core.setOutput("run_id", String(run.id));
+                core.info(`Reusing ARM64 bootstrap from run ${run.run_number} (${run.id}).`);
+                return;
+              }
+            }
+            core.notice("No reusable successful ARM64 runtime artifact found; only the UI APK will be produced.");
+
+      - name: Download reusable ARM64 runtime
+        if: steps.runtime.outputs.run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: codex-zh-private-runtime-arm64
+          path: runtime/dist
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.runtime.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate and embed reusable ARM64 runtime
+        if: steps.runtime.outputs.run_id != ''
+        run: |
+          python3 scripts/validate-private-runtime-bootstrap.py runtime/dist/bootstrap-aarch64.zip --manifest runtime/dist/bootstrap-manifest.json
+          mkdir -p app/src/main/assets/runtime
+          cp runtime/dist/bootstrap-aarch64.zip app/src/main/assets/runtime/
+          cp runtime/dist/bootstrap-manifest.json app/src/main/assets/runtime/
+
+      - name: Assemble debug APK with bundled ARM64 runtime
+        if: steps.runtime.outputs.run_id != ''
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Upload debug APK with bundled ARM64 runtime
+        if: steps.runtime.outputs.run_id != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-zh-android-debug-with-runtime
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14

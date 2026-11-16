@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
@@ -39,6 +40,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -53,6 +56,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -135,6 +140,7 @@ internal class CodexChatUiState {
     var selectedModelId by mutableStateOf<String?>(null)
     var selectedReasoningEffort by mutableStateOf<String?>(null)
     var isWorking by mutableStateOf(false)
+    var activityRevision by mutableStateOf(0)
     var isSubmitting by mutableStateOf(false)
     var status by mutableStateOf("尚未连接 Codex")
     var error by mutableStateOf<String?>(null)
@@ -394,6 +400,7 @@ internal class CodexChatUiState {
     }
 
     fun applyNotification(message: JSONObject) {
+        activityRevision += 1
         val method = message.optString("method")
         val params = message.optJSONObject("params") ?: JSONObject()
         when (method) {
@@ -418,8 +425,14 @@ internal class CodexChatUiState {
             "turn/completed" -> {
                 val turn = params.optJSONObject("turn") ?: JSONObject()
                 val result = turn.optString("status").ifBlank { "completed" }
+                val failure = turn.optJSONObject("error")?.optString("message")
+                    ?.takeIf { it.isNotBlank() }
+                    ?: turn.optString("error").takeIf { it.isNotBlank() }
                 isWorking = false
                 activeTurnId = null
+                if (result == "failed") {
+                    error = failure ?: "Codex 本轮执行失败；请检查服务商配置和运行诊断"
+                }
                 status = when (result) {
                     "completed" -> "本轮已完成"
                     "interrupted" -> "任务已中断"
@@ -429,7 +442,12 @@ internal class CodexChatUiState {
             }
             "item/agentMessage/delta" -> {
                 val itemId = params.optString("itemId")
-                append("assistant:$itemId", "Codex", params.optString("delta"))
+                val delta = params.optString("delta")
+                if (delta.isNotEmpty()) {
+                    error = null
+                    status = "Codex 正在生成回复"
+                    append("assistant:$itemId", "Codex", delta)
+                }
             }
             "item/commandExecution/outputDelta" -> {
                 val itemId = params.optString("itemId")
@@ -559,6 +577,28 @@ internal fun CodexChatScreen(
     val runtimeManager = remember(context) { RuntimeManager(context) }
     val providerRepository = remember(context) { ProviderRepository(context) }
     var prompt by remember { mutableStateOf("") }
+    var enterSendsMessage by remember(context) {
+        mutableStateOf(
+            context.getSharedPreferences("codex_chat_ui", Context.MODE_PRIVATE)
+                .getBoolean("enter_sends_message", true)
+        )
+    }
+    val messageListState = rememberLazyListState()
+    var followLatestMessage by remember { mutableStateOf(true) }
+    LaunchedEffect(messageListState) {
+        snapshotFlow {
+            val info = messageListState.layoutInfo
+            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: -1
+            info.totalItemsCount == 0 || lastVisible >= info.totalItemsCount - 2
+        }.collect { atBottom ->
+            followLatestMessage = atBottom
+        }
+    }
+    LaunchedEffect(state.entries.size, state.entries.lastOrNull()?.text, followLatestMessage) {
+        if (followLatestMessage && state.entries.isNotEmpty()) {
+            messageListState.scrollToItem(state.entries.lastIndex)
+        }
+    }
     var modelMenuExpanded by remember { mutableStateOf(false) }
     var effortMenuExpanded by remember { mutableStateOf(false) }
     var actionMenuThreadId by remember { mutableStateOf<String?>(null) }
@@ -986,12 +1026,15 @@ internal fun CodexChatScreen(
         scope.launch {
             state.isSubmitting = true
             state.error = null
-            state.entries.add(CodexChatEntry(
-                id = "user:${System.nanoTime()}",
-                title = "你",
-                text = text,
-                isUser = true
-            ))
+            state.status = "正在连接 Codex 并提交消息…"
+            state.entries.add(
+                CodexChatEntry(
+                    id = "user:${System.nanoTime()}",
+                    title = "你",
+                    text = text,
+                    isUser = true
+                )
+            )
             try {
                 val agent = ensureAgent()
                 val threadId = state.threadId ?: run {
@@ -1012,10 +1055,11 @@ internal fun CodexChatScreen(
                     withContext(Dispatchers.IO) {
                         agent.steerTurn(threadId, activeTurn, text)
                     }
-                    state.status = "已把补充指令发送给 Codex"
+                    state.status = "补充指令已发送，正在等待 Codex 处理"
                 } else {
                     val cwd = state.workingDirectory ?: defaultWorkspace(runtimeManager.paths.home)
                     state.isWorking = true
+                    val revisionBeforeStart = state.activityRevision
                     val turn = withContext(Dispatchers.IO) {
                         agent.startTurn(
                             threadId,
@@ -1026,17 +1070,44 @@ internal fun CodexChatScreen(
                         )
                     }
                     if (state.isWorking) state.activeTurnId = turn.id
-                    state.status = if (state.isWorking) "已发送，正在等待 Codex 回复" else state.status
+                    state.status = "消息已提交，正在等待 Codex 回复"
+
+                    // A successful turn/start acknowledgement does not guarantee that
+                    // a third-party relay will stream events. Surface an inactivity
+                    // warning rather than leaving the user with a silent chat.
+                    scope.launch {
+                        var lastRevision = revisionBeforeStart
+                        repeat(3) {
+                            delay(60_000L)
+                            if (!state.isWorking || state.activeTurnId != turn.id) return@launch
+                            val currentRevision = state.activityRevision
+                            if (currentRevision == lastRevision) {
+                                state.error =
+                                    "消息已提交，但连续 60 秒没有收到新的执行事件。请检查网络，以及中转站是否兼容 Codex Responses API 的流式事件和工具调用。"
+                                state.status = "等待服务端响应时间过长"
+                                return@launch
+                            }
+                            lastRevision = currentRevision
+                        }
+                    }
                 }
             } catch (error: Exception) {
                 state.isWorking = false
                 state.activeTurnId = null
                 state.error = error.message?.take(600) ?: "连接 Codex 时发生未知错误"
-                state.status = "操作未完成"
+                state.status = "消息未能完成提交"
             } finally {
                 state.isSubmitting = false
             }
         }
+    }
+
+    fun submitPrompt() {
+        val text = prompt.trim()
+        if (text.isBlank() || state.isSubmitting) return
+        prompt = ""
+        followLatestMessage = true
+        connectAndSend(text)
     }
 
     fun submitUserInput() {
@@ -1593,16 +1664,16 @@ internal fun CodexChatScreen(
                 }
             }
             Text(
-                when {
+                state.error?.let { "需要留意：$it" } ?: when {
                     state.pendingApproval != null || state.pendingUserInput != null -> "等待你处理一项请求"
-                    state.isWorking -> "Codex 正在执行任务"
-                    state.controller?.isConnected == true -> "Codex 已连接"
+                    state.isWorking -> state.status
+                    state.controller?.isConnected == true -> "Codex 已连接 · ${state.status}"
                     else -> state.status
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = if (state.error != null) MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1
+                maxLines = 2
             )
         if (showWorkspacePicker) {
             AlertDialog(
@@ -1785,6 +1856,7 @@ internal fun CodexChatScreen(
         }
 
         LazyColumn(
+            state = messageListState,
             modifier = Modifier.weight(1f).fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -1871,27 +1943,46 @@ internal fun CodexChatScreen(
                 Modifier.fillMaxWidth().padding(8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                OutlinedTextField(
-                    value = prompt,
-                    onValueChange = { prompt = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 1,
-                    maxLines = 5,
-                    enabled = !state.isSubmitting && state.pendingApproval == null && state.pendingUserInput == null,
-                    placeholder = { Text("给 Codex 安排任务…") },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = {
-                        val text = prompt.trim()
-                        if (text.isNotEmpty()) {
-                            prompt = ""
-                            connectAndSend(text)
-                        }
-                    })
-                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = prompt,
+                        onValueChange = { prompt = it },
+                        modifier = Modifier.weight(1f),
+                        minLines = 1,
+                        maxLines = 4,
+                        enabled = !state.isSubmitting &&
+                            state.pendingApproval == null && state.pendingUserInput == null,
+                        placeholder = { Text("给 Codex 安排任务…") },
+                        keyboardOptions = KeyboardOptions(
+                            imeAction = if (enterSendsMessage) ImeAction.Send else ImeAction.Default
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onSend = { if (enterSendsMessage) submitPrompt() }
+                        )
+                    )
+                    Button(
+                        onClick = { submitPrompt() },
+                        enabled = prompt.isNotBlank() && !state.isSubmitting &&
+                            state.pendingApproval == null && state.pendingUserInput == null
+                    ) {
+                        if (state.isSubmitting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text(if (state.isWorking) "追加" else "发送")
+                        }
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     Box {
                         TextButton(onClick = { toolsMenuExpanded = true }) {
@@ -1962,6 +2053,17 @@ internal fun CodexChatScreen(
                         maxLines = 1,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    TextButton(
+                        onClick = {
+                            enterSendsMessage = !enterSendsMessage
+                            context.getSharedPreferences("codex_chat_ui", Context.MODE_PRIVATE)
+                                .edit()
+                                .putBoolean("enter_sends_message", enterSendsMessage)
+                                .apply()
+                        }
+                    ) {
+                        Text(if (enterSendsMessage) "回车：发送" else "回车：换行")
+                    }
                     if (state.isWorking && !state.activeTurnId.isNullOrBlank()) {
                         TextButton(
                             onClick = {
@@ -1971,25 +2073,18 @@ internal fun CodexChatScreen(
                                 scope.launch {
                                     runCatching {
                                         withContext(Dispatchers.IO) { agent.interruptTurn(thread, turn) }
-                                    }.onFailure { state.error = it.message ?: "停止任务失败" }
+                                    }.onSuccess {
+                                        state.status = "已发送停止请求"
+                                    }.onFailure {
+                                        state.error = it.message ?: "停止任务失败"
+                                    }
                                 }
                             }
                         ) { Text("停止") }
                     }
-                    Button(
-                        onClick = {
-                            val text = prompt.trim()
-                            prompt = ""
-                            connectAndSend(text)
-                        },
-                        enabled = prompt.isNotBlank() && !state.isSubmitting &&
-                            state.pendingApproval == null && state.pendingUserInput == null
-                    ) {
-                        if (state.isSubmitting) CircularProgressIndicator()
-                        else Text(if (state.isWorking) "追加" else "发送")
-                    }
                 }
             }
+        }
         }
     }
     }
