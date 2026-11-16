@@ -424,6 +424,21 @@ internal class CodexChatUiState {
         }
     }
 
+    fun containsAssistantMessage(items: JSONArray): Boolean =
+        (0 until items.length()).any { index ->
+            val item = items.optJSONObject(index) ?: return@any false
+            item.optString("type") == "agentMessage" && item.optString("text").isNotBlank()
+        }
+
+    fun responseContainsAssistantMessage(response: JSONObject): Boolean {
+        val data = response.optJSONArray("data") ?: return false
+        return (0 until data.length()).any { index ->
+            val entry = data.optJSONObject(index) ?: return@any false
+            val item = entry.optJSONObject("item") ?: return@any false
+            item.optString("type") == "agentMessage" && item.optString("text").isNotBlank()
+        }
+    }
+
     fun describeTurnError(turn: JSONObject): String? {
         val turnError = turn.optJSONObject("error") ?: return null
         return listOf(
@@ -450,13 +465,14 @@ internal class CodexChatUiState {
             }.onSuccess { response ->
                 mainHandler.post {
                     if (this.threadId == threadId) {
+                        val hasFinalText = responseContainsAssistantMessage(response)
                         appendListedTurnItems(response)
-                        if (entries.none { !it.isUser && !it.isActivity && it.text.isNotBlank() }) {
-                            error = "服务端已结束本轮，但没有返回助手正文。请检查服务商 Responses API 实际返回内容。"
+                        if (!hasFinalText) {
+                            error = "服务端已结束本轮，但当前轮次的会话记录没有助手正文。请检查服务商 Responses API 实际返回内容。"
                             status = "本轮已结束，但没有可显示的回复"
                         } else {
                             error = null
-                            status = "已从会话记录同步最终回复"
+                            status = "已从当前轮次记录同步最终回复"
                         }
                     }
                 }
@@ -1112,6 +1128,9 @@ internal fun CodexChatScreen(
                     val response = withContext(Dispatchers.IO) {
                         agent.listTurns(threadId, limit = 10, sortDirection = "desc")
                     }
+                    if (state.threadId != threadId || state.activeTurnId != turnId || !state.isWorking) {
+                        return@launch
+                    }
                     val data = response.optJSONArray("data") ?: JSONArray()
                     val turn = (0 until data.length())
                         .mapNotNull { data.optJSONObject(it) }
@@ -1124,33 +1143,54 @@ internal fun CodexChatScreen(
                     queryFailure = null
                     when (lastStatus) {
                         "completed", "failed", "interrupted" -> {
+                            val turnItems = turn.optJSONArray("items") ?: JSONArray()
+                            var hasAssistantText = state.containsAssistantMessage(turnItems)
                             state.appendCompletedTurnItems(turn)
-                            val items = turn.optJSONArray("items") ?: JSONArray()
-                            val hasAssistantText = (0 until items.length()).any { index ->
-                                val item = items.optJSONObject(index) ?: return@any false
-                                item.optString("type") == "agentMessage" &&
-                                    item.optString("text").isNotBlank()
-                            }
+                            var itemSyncFailure: String? = null
                             if (!hasAssistantText && lastStatus == "completed") {
-                                val listed = withContext(Dispatchers.IO) {
-                                    agent.listItems(threadId, turnId = turnId, limit = 200, sortDirection = "asc")
+                                try {
+                                    val listed = withContext(Dispatchers.IO) {
+                                        agent.listItems(
+                                            threadId,
+                                            turnId = turnId,
+                                            limit = 200,
+                                            sortDirection = "asc"
+                                        )
+                                    }
+                                    if (state.threadId != threadId || state.activeTurnId != turnId) {
+                                        return@launch
+                                    }
+                                    hasAssistantText = state.responseContainsAssistantMessage(listed)
+                                    state.appendListedTurnItems(listed)
+                                } catch (failure: Exception) {
+                                    itemSyncFailure = failure.message ?: "未知错误"
                                 }
-                                state.appendListedTurnItems(listed)
                             }
                             state.isWorking = false
                             state.activeTurnId = null
                             val failure = state.describeTurnError(turn)
-                            if (lastStatus == "failed") {
-                                state.error = failure ?: "本轮已失败，但服务端没有提供具体错误信息"
-                                state.status = "任务执行失败"
-                            } else {
-                                state.error = null
-                                state.status = when (lastStatus) {
-                                    "completed" -> if (state.entries.none {
-                                        !it.isUser && !it.isActivity && it.text.isNotBlank()
-                                    }) "服务端已完成本轮，但没有返回可显示的助手正文"
-                                    else "已从服务端会话记录同步最终回复"
-                                    else -> "任务已中断"
+                            when (lastStatus) {
+                                "failed" -> {
+                                    state.error = failure ?: "本轮已失败，但服务端没有提供具体错误信息"
+                                    state.status = "任务执行失败"
+                                }
+                                "interrupted" -> {
+                                    state.error = null
+                                    state.status = "任务已中断"
+                                }
+                                else -> {
+                                    state.error = when {
+                                        hasAssistantText -> null
+                                        itemSyncFailure != null ->
+                                            "本轮已结束，但读取最终消息失败：$itemSyncFailure"
+                                        else ->
+                                            "服务端已完成本轮，但当前轮次没有返回助手正文。请检查中转站是否正确处理 Responses API。"
+                                    }
+                                    state.status = if (hasAssistantText) {
+                                        "已从服务端同步当前轮次最终回复"
+                                    } else {
+                                        "本轮已结束，但没有可显示的回复"
+                                    }
                                 }
                             }
                             return@launch

@@ -84,6 +84,8 @@ if "showRootDetails" not in main:
     errors.append("MainActivity.kt: Root controls must be collapsible")
 if "appendCompletedTurnItems(turn)" not in chat or "fun monitorTurn(" not in chat or "requestFinalItems(thread, turnId)" not in chat:
     errors.append("CodexChatScreen.kt: completed turn reconciliation, item sync and history polling are missing")
+if "responseContainsAssistantMessage(response)" not in chat or "agent.listItems(" not in chat:
+    errors.append("CodexChatScreen.kt: final text must be verified against the current turn's server items")
 if "codexErrorInfo" not in chat or "additionalDetails" not in chat:
     errors.append("CodexChatScreen.kt: structured Codex turn errors are not exposed")
 if "activityRevision" in chat or "消息已提交，但连续 60 秒" in chat:
