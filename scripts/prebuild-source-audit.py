@@ -68,7 +68,7 @@ if "enter_sends_message" not in chat or "ImeAction.Default" not in chat or "ImeA
     errors.append("CodexChatScreen.kt: Enter-send/newline preference is missing")
 if "state = messageListState" not in chat or "snapshotFlow" not in chat:
     errors.append("CodexChatScreen.kt: message list follow-latest behavior is missing")
-if "fun monitorTurn(" not in chat or "thread/turns/list" not in chat:
+if "fun monitorTurn(" not in chat or "agent.listTurns(" not in chat:
     errors.append("CodexChatScreen.kt: server-backed turn status monitoring is missing")
 if "requestFinalItems(thread, turnId)" not in chat or "appendListedTurnItems(response)" not in chat:
     errors.append("CodexChatScreen.kt: final conversation item recovery is missing")
@@ -86,6 +86,8 @@ if "appendCompletedTurnItems(turn)" not in chat or "fun monitorTurn(" not in cha
     errors.append("CodexChatScreen.kt: completed turn reconciliation, item sync and history polling are missing")
 if "codexErrorInfo" not in chat or "additionalDetails" not in chat:
     errors.append("CodexChatScreen.kt: structured Codex turn errors are not exposed")
+if "activityRevision" in chat or "消息已提交，但连续 60 秒" in chat:
+    errors.append("CodexChatScreen.kt: obsolete delta-only timeout logic must stay removed")
 if "TerminalSurface(terminal.frame) { terminal.loadScrollback() }" not in main:
     errors.append("MainActivity.kt: terminal view must request native scrollback")
 terminal_view = (ROOT / "app/src/main/java/io/github/zby1888/codexzh/TerminalSoftwareView.kt").read_text()

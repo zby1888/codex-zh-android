@@ -8,14 +8,8 @@ on:
       - "runtime/private-runtime-config.json"
       - "scripts/prepare-private-runtime-source.py"
       - "scripts/validate-private-runtime-bootstrap.py"
-  # Documentation-only edits under runtime/ do not start the multi-hour ARM64 build.
-  pull_request:
-    branches: [main]
-    paths:
-      - "runtime/sources.lock.yml"
-      - "runtime/private-runtime-config.json"
-      - "scripts/prepare-private-runtime-source.py"
-      - "scripts/validate-private-runtime-bootstrap.py"
+  # Pull requests use a previously validated Runtime artifact from ci.yml.
+  # Dispatch this workflow manually to validate a proposed Runtime-source change before merging.
   workflow_dispatch:
 
 permissions:
