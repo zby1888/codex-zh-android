@@ -121,7 +121,12 @@ private fun TerminalScreen(
     var command by remember { mutableStateOf("") }
     var desiredRows by remember { mutableIntStateOf(24) }
     var desiredColumns by remember { mutableIntStateOf(80) }
-    var terminalFontScale by remember { mutableFloatStateOf(1.2f) }
+    val terminalPreferences = remember(context) {
+        context.getSharedPreferences("codex_terminal_ui", 0)
+    }
+    var terminalFontScale by remember(terminalPreferences) {
+        mutableFloatStateOf(terminalPreferences.getFloat("font_scale", 1.2f).coerceIn(0.8f, 1.8f))
+    }
     var terminalWidthPx by remember { mutableIntStateOf(0) }
     var terminalHeightPx by remember { mutableIntStateOf(0) }
     var showRootDetails by remember { mutableStateOf(false) }
@@ -260,6 +265,15 @@ private fun TerminalScreen(
             ) { Text(if (terminal.isRunning) "结束" else "启动") }
         }
 
+        if (terminal.isRunning && terminal.workingDirectory != currentWorkspace) {
+            TextButton(
+                onClick = { terminal.changeDirectory(currentWorkspace) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("切换到当前项目目录")
+            }
+        }
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
@@ -268,7 +282,10 @@ private fun TerminalScreen(
             Spacer(Modifier.weight(1f))
             Text("字号", style = MaterialTheme.typography.labelSmall)
             TextButton(
-                onClick = { terminalFontScale = (terminalFontScale - 0.1f).coerceAtLeast(0.8f) },
+                onClick = {
+                    terminalFontScale = (terminalFontScale - 0.1f).coerceAtLeast(0.8f)
+                    terminalPreferences.edit().putFloat("font_scale", terminalFontScale).apply()
+                },
                 enabled = terminalFontScale > 0.8f
             ) { Text("A−") }
             Text(
@@ -276,7 +293,10 @@ private fun TerminalScreen(
                 style = MaterialTheme.typography.labelMedium
             )
             TextButton(
-                onClick = { terminalFontScale = (terminalFontScale + 0.1f).coerceAtMost(1.8f) },
+                onClick = {
+                    terminalFontScale = (terminalFontScale + 0.1f).coerceAtMost(1.8f)
+                    terminalPreferences.edit().putFloat("font_scale", terminalFontScale).apply()
+                },
                 enabled = terminalFontScale < 1.8f
             ) { Text("A＋") }
         }

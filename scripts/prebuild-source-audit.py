@@ -74,6 +74,10 @@ if "Button(\n                        onClick = { submitPrompt() }" not in chat:
     errors.append("CodexChatScreen.kt: send button is not in the composer input row")
 if "terminalFontScale" not in main or "10.5f * density * terminalFontScale" not in main:
     errors.append("MainActivity.kt: adjustable terminal font/grid geometry is missing")
+if "codex_terminal_ui" not in main or 'putFloat("font_scale"' not in main:
+    errors.append("MainActivity.kt: terminal font size preference must persist")
+if 'terminal.changeDirectory(currentWorkspace)' not in main:
+    errors.append("MainActivity.kt: running terminal must retain the switch-to-current-workspace action")
 if "showRootDetails" not in main:
     errors.append("MainActivity.kt: Root controls must be collapsible")
 if "VTermScreenCallbacks screenCallbacks{}" not in native or "&terminal->screenCallbacks" not in native:
