@@ -51,6 +51,7 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
     var columns:Int=80; private set
 
     suspend fun start(workingDirectory:String,rows:Int=this.rows,columns:Int=this.columns,rootSuPath:String?=null) {
+        CrashLogManager.recordEvent(paths.appFiles, "terminal.start.requested")
         check(!isRunning && handle==0L){"终端会话已经启动"}
         val cwd=File(workingDirectory).canonicalFile
         check(cwd.isDirectory){"项目目录不存在或不是文件夹："+cwd.name}
@@ -113,12 +114,19 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
             arguments = arrayOf(executable, "-c", rootCommand)
         }
 
-        val newHandle=nativeMutex.withLock {
-            withContext(Dispatchers.IO) {
-                bridge.nativeCreate(executable,arguments,cwd.absolutePath,
-                    environment.keys.toTypedArray(),environment.values.toTypedArray(),rows,columns)
+        val newHandle=try {
+            nativeMutex.withLock {
+                CrashLogManager.recordEvent(paths.appFiles, "terminal.native_create.begin")
+                withContext(Dispatchers.IO) {
+                    bridge.nativeCreate(executable,arguments,cwd.absolutePath,
+                        environment.keys.toTypedArray(),environment.values.toTypedArray(),rows,columns)
+                }
             }
+        } catch (error: Throwable) {
+            CrashLogManager.recordEvent(paths.appFiles, "terminal.native_create.threw")
+            throw error
         }
+        CrashLogManager.recordEvent(paths.appFiles, if (newHandle == 0L) "terminal.native_create.zero_handle" else "terminal.native_create.returned")
         check(newHandle!=0L){"无法创建交互式 PTY"}
         this.rows=rows; this.columns=columns; handle=newHandle
         this.workingDirectory=cwd.absolutePath
@@ -134,7 +142,10 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
         isRootSession=isRoot
         isRunning=true
         message=if(isRoot) "已启动独立 Root Bash · "+cwd.name else "已启动应用私有 Bash · "+cwd.name
-        readerJob=scope.launch{readLoop(newHandle)}
+        readerJob=scope.launch {
+            CrashLogManager.recordEvent(paths.appFiles, "terminal.reader.started")
+            readLoop(newHandle)
+        }
     }
 
     private fun shellQuote(value:String):String = "'" + value.replace("'","'\\''") + "'"
@@ -180,6 +191,7 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
     fun stop() {
         val current=handle
         if(current==0L)return
+        CrashLogManager.recordEvent(paths.appFiles, "terminal.stop.requested")
         handle=0L
         isRootSession=false
         val reader=readerJob
@@ -221,10 +233,14 @@ internal class PtyTerminalSession(private val paths:RuntimePaths) {
                 }
             }
         } catch(cancelled:CancellationException){throw cancelled}
-        catch(error:Exception){finish(activeHandle,error.message?:"终端读取失败")}
+        catch(error:Exception){
+            CrashLogManager.recordEvent(paths.appFiles, "terminal.read_loop.exception")
+            finish(activeHandle,error.message?:"终端读取失败")
+        }
     }
 
     private suspend fun finish(activeHandle:Long,status:String,finalFrame:TerminalFrame?=null) {
+        CrashLogManager.recordEvent(paths.appFiles, "terminal.finish")
         withContext(Dispatchers.Main.immediate) {
             if(handle==activeHandle) {
                 handle=0L; isRunning=false; isRootSession=false; message=status

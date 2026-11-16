@@ -3,6 +3,7 @@ package io.github.zby1888.codexzh
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -27,13 +28,18 @@ import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        CrashLogManager.install(applicationContext)
+        CrashLogManager.recordEvent(filesDir, "app.on_create")
         super.onCreate(savedInstanceState)
+        lifecycleScope.launch(Dispatchers.IO) {
+            CrashLogManager.collectPreviousProcessExits(applicationContext)
+        }
         setContent { CodexZhApp() }
     }
 }
 
 private enum class Tab(val label: String, val glyph: String) {
-    Chat("聊天", "聊"), Terminal("终端", ">_"), Providers("服务商", "模"), Mcp("MCP 工具", "M")
+    Chat("聊天", "聊"), Terminal("终端", ">_"), Providers("服务商", "模"), Mcp("MCP 工具", "M"), Diagnostics("诊断", "记")
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -93,6 +99,7 @@ private fun CodexZhApp() {
                 )
                 Tab.Providers -> ProviderScreen(Modifier.padding(padding))
                 Tab.Mcp -> CodexMcpScreen(Modifier.padding(padding), chatState) { tab = Tab.Providers }
+                Tab.Diagnostics -> CrashLogScreen(Modifier.padding(padding))
             }
         }
     }
