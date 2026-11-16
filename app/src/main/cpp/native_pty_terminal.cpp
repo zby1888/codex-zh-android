@@ -12,8 +12,11 @@
 #include <termios.h>
 #include <unistd.h>
 #include <algorithm>
+#include <atomic>
+#include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include <vterm.h>
 
@@ -24,8 +27,40 @@ constexpr jint kRunning=INT32_MIN;
 struct Terminal {
     int master=-1; pid_t child=-1; int rows=24,columns=80;
     VTerm* vt=nullptr; VTermScreen* screen=nullptr;
-    bool cursorVisible=true,reaped=false; int exitCode=0; std::mutex mutex;
+    bool cursorVisible=true,reaped=false,closing=false;
+    int exitCode=0;
+    std::mutex mutex;
 };
+
+// JNI never receives a raw Terminal* anymore. A Java coroutine may already have
+// captured a handle when stop()/finish() starts closing the PTY. The registry
+// keeps the object alive for in-flight calls and makes late calls harmless.
+std::mutex gRegistryMutex;
+std::unordered_map<jlong,std::shared_ptr<Terminal>> gTerminals;
+std::atomic<jlong> gNextHandle{1};
+
+jlong registerTerminal(const std::shared_ptr<Terminal>& terminal) {
+    const jlong handle=gNextHandle.fetch_add(1,std::memory_order_relaxed);
+    if(handle<=0) return 0;
+    std::lock_guard<std::mutex> lock(gRegistryMutex);
+    gTerminals.emplace(handle,terminal);
+    return handle;
+}
+std::shared_ptr<Terminal> findTerminal(jlong handle) {
+    if(handle<=0)return {};
+    std::lock_guard<std::mutex> lock(gRegistryMutex);
+    const auto it=gTerminals.find(handle);
+    return it==gTerminals.end()?std::shared_ptr<Terminal>{}:it->second;
+}
+std::shared_ptr<Terminal> removeTerminal(jlong handle) {
+    if(handle<=0)return {};
+    std::lock_guard<std::mutex> lock(gRegistryMutex);
+    const auto it=gTerminals.find(handle);
+    if(it==gTerminals.end())return {};
+    auto terminal=std::move(it->second);
+    gTerminals.erase(it);
+    return terminal;
+}
 void throwState(JNIEnv* env,const char* message) {
     jclass type=env->FindClass("java/lang/IllegalStateException");
     if(type)env->ThrowNew(type,message);
@@ -154,6 +189,7 @@ Java_io_github_zby1888_codexzh_NativePtyBridge_nativeCreate(
     std::vector<char*> envp; envp.reserve(envStorage.size()+1);
     for(auto& entry:envStorage)envp.push_back(entry.data()); envp.push_back(nullptr);
 
+    auto terminal=std::make_shared<Terminal>();
     const int master=posix_openpt(O_RDWR|O_NOCTTY|O_CLOEXEC|O_NONBLOCK);
     if(master<0){throwState(env,"无法打开 Android PTY 主设备");return 0;}
     if(grantpt(master)!=0||unlockpt(master)!=0){close(master);throwState(env,"无法初始化 Android PTY 设备");return 0;}
@@ -189,10 +225,16 @@ Java_io_github_zby1888_codexzh_NativePtyBridge_nativeCreate(
         execve(shell.c_str(),argv.data(),envp.data());_exit(127);
     }
     close(slave);
-    auto* terminal=new Terminal();
     terminal->master=master;terminal->child=child;terminal->rows=rows;terminal->columns=columns;
     terminal->vt=vterm_new(rows,columns);
-    if(!terminal->vt){kill(-child,SIGTERM);close(master);delete terminal;throwState(env,"创建 VT 状态解析器失败");return 0;}
+    if(!terminal->vt){
+        kill(child,SIGKILL);
+        int status=0;
+        while(waitpid(child,&status,0)<0&&errno==EINTR){}
+        close(master);
+        throwState(env,"创建 VT 状态解析器失败");
+        return 0;
+    }
     vterm_set_utf8(terminal->vt,1);
     terminal->screen=vterm_obtain_screen(terminal->vt);
     vterm_screen_enable_altscreen(terminal->screen,1);
@@ -200,14 +242,38 @@ Java_io_github_zby1888_codexzh_NativePtyBridge_nativeCreate(
     VTermScreenCallbacks callbacks{};callbacks.settermprop=termProperty;
     vterm_screen_set_callbacks(terminal->screen,&callbacks,terminal);
     vterm_screen_reset(terminal->screen,1);
-    return reinterpret_cast<jlong>(terminal);
+    try {
+        const jlong handle=registerTerminal(terminal);
+        if(handle==0) {
+            kill(child,SIGKILL);
+            int status=0;
+            while(waitpid(child,&status,0)<0&&errno==EINTR){}
+            close(master);
+            vterm_free(terminal->vt);
+            terminal->vt=nullptr;
+            terminal->screen=nullptr;
+            throwState(env,"无法分配 PTY 会话句柄");
+            return 0;
+        }
+        return handle;
+    } catch(const std::exception&) {
+        kill(child,SIGKILL);
+        int status=0;
+        while(waitpid(child,&status,0)<0&&errno==EINTR){}
+        close(master);
+        vterm_free(terminal->vt);
+        terminal->vt=nullptr;
+        terminal->screen=nullptr;
+        throwState(env,"无法登记 PTY 会话");
+        return 0;
+    }
 }
 
 extern "C" JNIEXPORT jint JNICALL
 Java_io_github_zby1888_codexzh_NativePtyBridge_nativeRead(JNIEnv* env,jobject,jlong handle,jbyteArray output,jint timeout) {
-    auto* term=reinterpret_cast<Terminal*>(handle);if(!term||!output)return -1;
+    auto term=findTerminal(handle);if(!term||!output)return -1;
     std::lock_guard<std::mutex> lock(term->mutex);
-    if(term->master<0||term->reaped)return -1;
+    if(term->closing||term->master<0||term->reaped)return -1;
     const jsize capacity=env->GetArrayLength(output);if(capacity<=0)return 0;
     jbyte* bytes=env->GetByteArrayElements(output,nullptr);if(!bytes)return -1;
     struct pollfd descriptor{term->master,static_cast<short>(POLLIN|POLLHUP|POLLERR),0};
@@ -226,9 +292,9 @@ Java_io_github_zby1888_codexzh_NativePtyBridge_nativeRead(JNIEnv* env,jobject,jl
 
 extern "C" JNIEXPORT jint JNICALL
 Java_io_github_zby1888_codexzh_NativePtyBridge_nativeWrite(JNIEnv* env,jobject,jlong handle,jbyteArray input) {
-    auto* term=reinterpret_cast<Terminal*>(handle);if(!term||!input)return -1;
+    auto term=findTerminal(handle);if(!term||!input)return -1;
     std::lock_guard<std::mutex> lock(term->mutex);
-    if(term->master<0||term->reaped)return -1;
+    if(term->closing||term->master<0||term->reaped)return -1;
     const jsize length=env->GetArrayLength(input);if(length==0)return 0;
     jbyte* bytes=env->GetByteArrayElements(input,nullptr);if(!bytes)return -1;
     size_t offset=0;
@@ -244,9 +310,9 @@ Java_io_github_zby1888_codexzh_NativePtyBridge_nativeWrite(JNIEnv* env,jobject,j
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_io_github_zby1888_codexzh_NativePtyBridge_nativeResize(JNIEnv*,jobject,jlong handle,jint rows,jint columns) {
-    auto* term=reinterpret_cast<Terminal*>(handle);
+    auto term=findTerminal(handle);
     if(!term||rows<8||rows>80||columns<20||columns>160)return JNI_FALSE;
-    std::lock_guard<std::mutex> lock(term->mutex);if(term->master<0||term->reaped)return JNI_FALSE;
+    std::lock_guard<std::mutex> lock(term->mutex);if(term->closing||term->master<0||term->reaped)return JNI_FALSE;
     struct winsize ws{};ws.ws_row=static_cast<unsigned short>(rows);ws.ws_col=static_cast<unsigned short>(columns);
     if(ioctl(term->master,TIOCSWINSZ,&ws)!=0)return JNI_FALSE;
     term->rows=rows;term->columns=columns;vterm_set_size(term->vt,rows,columns);vterm_screen_flush_damage(term->screen);
@@ -254,8 +320,8 @@ Java_io_github_zby1888_codexzh_NativePtyBridge_nativeResize(JNIEnv*,jobject,jlon
 }
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_io_github_zby1888_codexzh_NativePtyBridge_nativeSnapshot(JNIEnv* env,jobject,jlong handle) {
-    auto* term=reinterpret_cast<Terminal*>(handle);if(!term)return nullptr;
-    std::lock_guard<std::mutex> lock(term->mutex);if(!term->vt||!term->screen)return nullptr;
+    auto term=findTerminal(handle);if(!term)return nullptr;
+    std::lock_guard<std::mutex> lock(term->mutex);if(term->closing||!term->vt||!term->screen)return nullptr;
     const auto bytes=makeSnapshot(term);if(bytes.size()>static_cast<size_t>(INT32_MAX))return nullptr;
     jbyteArray result=env->NewByteArray(static_cast<jsize>(bytes.size()));
     if(result&&!bytes.empty())env->SetByteArrayRegion(result,0,static_cast<jsize>(bytes.size()),reinterpret_cast<const jbyte*>(bytes.data()));
@@ -263,14 +329,18 @@ Java_io_github_zby1888_codexzh_NativePtyBridge_nativeSnapshot(JNIEnv* env,jobjec
 }
 extern "C" JNIEXPORT jint JNICALL
 Java_io_github_zby1888_codexzh_NativePtyBridge_nativeExitCode(JNIEnv*,jobject,jlong handle) {
-    auto* term=reinterpret_cast<Terminal*>(handle);if(!term)return 255;
-    std::lock_guard<std::mutex> lock(term->mutex);reap(term);return term->reaped?term->exitCode:kRunning;
+    auto term=findTerminal(handle);if(!term)return 255;
+    std::lock_guard<std::mutex> lock(term->mutex);
+    if(term->closing)return 255;
+    reap(term);return term->reaped?term->exitCode:kRunning;
 }
 extern "C" JNIEXPORT void JNICALL
 Java_io_github_zby1888_codexzh_NativePtyBridge_nativeClose(JNIEnv*,jobject,jlong handle) {
-    auto* term=reinterpret_cast<Terminal*>(handle);if(!term)return;
+    auto term=removeTerminal(handle);if(!term)return;
     {
         std::lock_guard<std::mutex> lock(term->mutex);
+        if(term->closing)return;
+        term->closing=true;
         if(term->child>0&&!term->reaped) {
             kill(-term->child,SIGHUP);
             for(int i=0;i<10&&!term->reaped;++i){reap(term);usleep(20000);}
@@ -281,5 +351,4 @@ Java_io_github_zby1888_codexzh_NativePtyBridge_nativeClose(JNIEnv*,jobject,jlong
         if(term->master>=0){close(term->master);term->master=-1;}
         if(term->vt){vterm_free(term->vt);term->vt=nullptr;term->screen=nullptr;}
     }
-    delete term;
 }
