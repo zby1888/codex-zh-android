@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <algorithm>
 #include <atomic>
+#include <exception>
 #include <memory>
 #include <mutex>
 #include <string>
