@@ -97,7 +97,7 @@ if "canvas.drawText(cell.text" not in terminal_view or "canvas.drawRect(" not in
 crash_manager = (path.parent.parent / "app" / "src" / "main" / "java" / "io" / "github" / "zby1888" / "codexzh" / "CrashLogManager.kt").read_text(encoding="utf-8")
 crash_screen = (path.parent.parent / "app" / "src" / "main" / "java" / "io" / "github" / "zby1888" / "codexzh" / "CrashLogScreen.kt").read_text(encoding="utf-8")
 manifest = (path.parent.parent / "app" / "src" / "main" / "AndroidManifest.xml").read_text(encoding="utf-8")
-for required in ("setDefaultUncaughtExceptionHandler", "getHistoricalProcessExitReasons", "getTraceInputStream", "tombstone.pb", "recordEvent"):
+for required in ("setDefaultUncaughtExceptionHandler", "getHistoricalProcessExitReasons", "traceInputStream", "tombstone.pb", "recordEvent"):
     if required not in crash_manager:
         raise SystemExit(f"Crash logger is missing required capture behavior: {required}")
 if "terminal.native_create.begin" not in pty_session or "terminal.reader.started" not in pty_session:
@@ -110,6 +110,7 @@ if "CrashLogScreen(Modifier.padding(padding))" not in main_activity or "导出�
     raise SystemExit("Crash logs must be visible and exportable inside the app")
 if "androidx.core.content.FileProvider" not in manifest or "@xml/crash_log_paths" not in manifest:
     raise SystemExit("Crash-log export must use a scoped FileProvider")
+runtime_workflow = (path.parent.parent / ".github" / "workflows" / "build-private-runtime.yml").read_text(encoding="utf-8")
 for diagnostic_path in ("CrashLogManager.kt", "CrashLogScreen.kt", "crash_log_paths.xml"):
     if diagnostic_path not in runtime_workflow:
         raise SystemExit(f"Full APK workflow must be triggered by diagnostics file changes: {diagnostic_path}")
