@@ -35,7 +35,7 @@ jobs:
       - name: Audit all source files before building
         run: |
           python3 scripts/prebuild-source-audit.py
-          python3 -m py_compile scripts/prebuild-source-audit.py scripts/validate-source-locks.py
+          python3 -m py_compile scripts/prebuild-source-audit.py scripts/validate-source-locks.py scripts/apply-codex-android-launcher-patch.py scripts/mark-private-runtime-bootstrap.py
       - name: Validate locked runtime sources and project contracts
         run: python3 scripts/validate-source-locks.py
       - name: Assemble debug APK
@@ -53,38 +53,32 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const candidates = [
-              context.payload.pull_request?.head?.ref,
-              context.payload.pull_request?.base?.ref,
-              context.ref.replace(/^refs\/heads\//, "")
-            ].filter((value, index, all) => value && all.indexOf(value) === index);
-            for (const branch of candidates) {
-              const runs = await github.rest.actions.listWorkflowRuns({
+            const branch = context.payload.pull_request?.head?.ref ?? context.ref.replace(/^refs\/heads\//, "");
+            const runs = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: "build-private-runtime.yml",
+              branch,
+              status: "completed",
+              per_page: 20
+            });
+            for (const run of runs.data.workflow_runs.filter(item => item.conclusion === "success")) {
+              const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                workflow_id: "build-private-runtime.yml",
-                branch,
-                status: "completed",
-                per_page: 20
+                run_id: run.id,
+                per_page: 100
               });
-              for (const run of runs.data.workflow_runs.filter(item => item.conclusion === "success")) {
-                const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  run_id: run.id,
-                  per_page: 100
-                });
-                const match = artifacts.data.artifacts.find(item =>
-                  item.name === "codex-zh-private-runtime-arm64" && !item.expired
-                );
-                if (match) {
-                  core.setOutput("run_id", String(run.id));
-                  core.info(`Reusing ARM64 bootstrap from ${branch}, run ${run.run_number} (${run.id}).`);
-                  return;
-                }
+              const match = artifacts.data.artifacts.find(item =>
+                item.name === "codex-zh-private-runtime-arm64" && !item.expired
+              );
+              if (match) {
+                core.setOutput("run_id", String(run.id));
+                core.info(`Reusing patched ARM64 bootstrap from ${branch}, run ${run.run_number} (${run.id}).`);
+                return;
               }
             }
-            core.notice("No reusable successful ARM64 runtime artifact found; only the UI APK will be produced.");
+            core.notice("No patched ARM64 runtime artifact is available for this branch yet; the dedicated runtime workflow must build the full APK.");
 
       - name: Download reusable ARM64 runtime
         if: steps.runtime.outputs.run_id != ''
