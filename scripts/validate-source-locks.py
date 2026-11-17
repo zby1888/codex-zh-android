@@ -165,4 +165,18 @@ for profile_name, packages in profiles.items():
         raise SystemExit(f"Optional profile {profile_name} duplicates base packages: {sorted(overlap)}")
     if any(not re.fullmatch(r"[a-z0-9][a-z0-9+.-]*", package) for package in packages):
         raise SystemExit(f"Invalid Termux package name in profile: {profile_name}")
+
+runtime_paths_source = (path.parent.parent / "app" / "src" / "main" / "java" / "io" / "github" / "zby1888" / "codexzh" / "RuntimePaths.kt").read_text(encoding="utf-8")
+for required in ("val codexCodeModeHost: File", "val runtimePatchMarker: File"):
+    if required not in runtime_paths_source:
+        raise SystemExit(f"RuntimePaths is missing required helper/patch path: {required}")
+for required in ("REQUIRED_ANDROID_PATCH_ID", "hasAndroidLauncherPatch()", "paths.codexCodeModeHost"):
+    if required not in runtime_manager:
+        raise SystemExit(f"RuntimeManager is missing Android launcher validation: {required}")
+launcher_patch = (path.parent.parent / "runtime" / "patches" / "codex-android-current-exe.patch").read_text(encoding="utf-8")
+if "current_executable_path()" not in launcher_patch or "TERMUX_EXEC__PROC_SELF_EXE" not in launcher_patch:
+    raise SystemExit("Pinned Codex source patch does not repair Android linker current_exe resolution")
+if "mark-private-runtime-bootstrap.py" not in runtime_workflow or "apply-codex-android-launcher-patch.py" not in runtime_workflow:
+    raise SystemExit("Runtime workflow must apply and mark the Android launcher patch")
+
 print(f"Validated {len(entries)} pinned source entries, {len(base)} base packages and {len(profiles)} optional profiles.")
