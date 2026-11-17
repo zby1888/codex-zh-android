@@ -118,6 +118,10 @@ internal class RuntimeBootstrapInstaller(
         check(manifest.optString("sha256").matches(Regex("^[0-9a-f]{64}$"))) {
             "运行时清单 SHA-256 格式无效"
         }
+        check(
+            manifest.optJSONObject("runtimePatches")
+                ?.optString("codexAndroidCurrentExe") == REQUIRED_ANDROID_PATCH_ID
+        ) { "运行环境缺少 Android linker/current_exe 修复，拒绝安装旧版运行时" }
     }
 
     private fun verifyAssetHash(
@@ -278,11 +282,16 @@ internal class RuntimeBootstrapInstaller(
     }
 
     private fun verifyInstalledFiles() {
-        val required = listOf(paths.bash, paths.env, paths.git, paths.execPreload)
+        val required = listOf(
+            paths.bash, paths.env, paths.git, paths.execPreload,
+            paths.codex, paths.codexCodeModeHost
+        )
         val missing = required.filterNot { it.exists() }
         check(missing.isEmpty()) {
             "运行时关键文件缺失：${missing.joinToString { it.relativeTo(paths.prefix).path }}"
         }
+        check(paths.codex.canExecute()) { "Codex CLI 没有执行权限" }
+        check(paths.codexCodeModeHost.canExecute()) { "Code Mode host 没有执行权限" }
     }
 
     private fun writeRuntimeMarker(manifest: JSONObject) {
@@ -292,7 +301,11 @@ internal class RuntimeBootstrapInstaller(
             setProperty("applicationId", context.packageName)
             setProperty("sha256", manifest.getString("sha256"))
             setProperty("sourceRef", manifest.optString("sourceRef"))
-            setProperty("installedAtVersion", "1")
+            setProperty(
+                "codexAndroidCurrentExe",
+                manifest.optJSONObject("runtimePatches")?.optString("codexAndroidCurrentExe").orEmpty()
+            )
+            setProperty("installedAtVersion", "2")
         }
         val temporary = File(paths.runtimeRoot, ".runtime.properties.tmp")
         temporary.outputStream().buffered().use { properties.store(it, "Codex Zh Android runtime") }
@@ -380,6 +393,7 @@ internal class RuntimeBootstrapInstaller(
         private const val ARCHIVE_ASSET = "runtime/bootstrap-aarch64.zip"
         private const val MANIFEST_ASSET = "runtime/bootstrap-manifest.json"
         private const val SYMLINKS_FILE = "SYMLINKS.txt"
+        private const val REQUIRED_ANDROID_PATCH_ID = "termux-proc-self-exe-v1"
         private const val MAX_ENTRIES = 80_000
         // The pinned Codex 0.169.0 ARM64 executable in the shipped bootstrap is
         // 202,819,272 bytes (about 193.4 MiB). 128 MiB rejected the valid binary.
