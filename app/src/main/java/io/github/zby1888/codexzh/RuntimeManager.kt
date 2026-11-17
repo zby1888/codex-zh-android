@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import java.io.File
 import java.util.Properties
+import org.json.JSONObject
 
 internal enum class RuntimePhase(val title: String) {
     UNSUPPORTED_ABI("设备架构不受支持"),
@@ -52,18 +53,20 @@ internal class RuntimeManager(context: Context) {
         val baseRuntimeInstalled = marker.getProperty("runtimeInstalled") == "true" &&
             marker.getProperty("abi") == "arm64-v8a" &&
             marker.getProperty("applicationId") == paths.appPackageName &&
+            marker.getProperty("codexAndroidCurrentExe") == REQUIRED_ANDROID_PATCH_ID &&
+            hasAndroidLauncherPatch() &&
             paths.bash.isFile && paths.env.exists() && paths.git.exists() &&
-            paths.execPreload.isFile
+            paths.execPreload.isFile && paths.codex.isFile && paths.codexCodeModeHost.isFile
 
         if (!baseRuntimeInstalled) {
             return RuntimeStatus(
                 RuntimePhase.LAYOUT_READY,
-                "应用私有目录已建立。下一步从 APK 内置资源离线安装 ARM64 工具链；不会访问 Termux。"
+                "检测到尚未安装或版本过旧的私有运行环境。将从本 APK 重新部署 ARM64 工具链和 Android 启动修复；不会访问 Termux。"
             )
         }
 
         val codex = File(paths.prefix, "bin/codex")
-        val helper = File(paths.prefix, "bin/codex-code-mode-host")
+        val helper = paths.codexCodeModeHost
         if (!codex.isFile || !codex.canExecute() || !helper.isFile || !helper.canExecute()) {
             return RuntimeStatus(
                 RuntimePhase.ERROR,
@@ -84,6 +87,11 @@ internal class RuntimeManager(context: Context) {
             )
         }
     }
+
+    private fun hasAndroidLauncherPatch(): Boolean = runCatching {
+        JSONObject(paths.runtimePatchMarker.readText(Charsets.UTF_8))
+            .optString("codexAndroidCurrentExe") == REQUIRED_ANDROID_PATCH_ID
+    }.getOrDefault(false)
 
     private fun runCodexVersion(codex: File, helper: File): String {
         check(codex.isFile && codex.canExecute()) { "codex 文件不存在或没有执行权限" }
@@ -129,9 +137,41 @@ internal class RuntimeManager(context: Context) {
             check(output.contains(EXPECTED_CODEX_VERSION)) {
                 "版本不匹配，期望 $EXPECTED_CODEX_VERSION，实际输出：${output.take(240)}"
             }
+            val helperOutputFile = File.createTempFile("codex-host-help-", ".txt", paths.temp)
+            try {
+                val helperBuilder = ProcessBuilder(paths.commandFor(helper, listOf("--help")))
+                    .directory(paths.home)
+                    .redirectErrorStream(true)
+                    .redirectOutput(helperOutputFile)
+                helperBuilder.environment().putAll(paths.environment())
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    helperBuilder.environment()["TERMUX_EXEC__PROC_SELF_EXE"] = helper.absolutePath
+                }
+                val helperProcess = helperBuilder.start()
+                var helperExitCode: Int? = null
+                var helperWaitFailure: Exception? = null
+                val helperWaiter = Thread {
+                    try { helperExitCode = helperProcess.waitFor() }
+                    catch (error: Exception) { helperWaitFailure = error }
+                }.apply { isDaemon = true }
+                helperWaiter.start()
+                helperWaiter.join(PROCESS_TIMEOUT_MS)
+                if (helperWaiter.isAlive) {
+                    helperProcess.destroy()
+                    helperWaiter.join(PROCESS_TERMINATION_GRACE_MS)
+                    throw IllegalStateException("codex-code-mode-host --help 启动超时")
+                }
+                helperWaitFailure?.let { throw IllegalStateException("等待 Code Mode host 退出失败", it) }
+                val helperOutput = helperOutputFile.readText(Charsets.UTF_8)
+                check(helperExitCode == 0 && helperOutput.contains("Usage:")) {
+                    "codex-code-mode-host 启动检查失败，退出码 $helperExitCode：${helperOutput.take(240)}"
+                }
+            } finally {
+                helperOutputFile.delete()
+            }
             return output.lineSequence().firstOrNull().orEmpty().ifBlank {
                 "codex $EXPECTED_CODEX_VERSION"
-            }
+            } + "；Code Mode host 启动检查通过"
         } finally {
             outputFile.delete()
         }
@@ -164,6 +204,7 @@ internal class RuntimeManager(context: Context) {
 
     companion object {
         private const val EXPECTED_CODEX_VERSION = "0.169.0"
+        private const val REQUIRED_ANDROID_PATCH_ID = "termux-proc-self-exe-v1"
         private const val PROCESS_TIMEOUT_MS = 15_000L
         private const val PROCESS_TERMINATION_GRACE_MS = 1_000L
     }

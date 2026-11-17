@@ -89,3 +89,31 @@ RikkaHub 使用 AGPL-3.0、Operit 使用 LGPL-3.0、OpenCode 使用 MIT。此处
 5. **最后做 Android 实机验收**：软键盘、长消息、流式输出、旋转屏幕、暗色主题、触控与性能。
 
 每个阶段都要单独构建并记录未完成项。仅完成静态 UI 不代表对应功能已经连通 Codex App Server 或 Runtime。
+
+## 消息复制、编辑与重发
+
+消息操作属于聊天页基础能力，不应等用户提出后再临时补按钮。
+
+- 用户消息、助手回复和可展开执行记录都应有易找到的“更多”菜单，至少支持复制；助手和用户正文同时支持 Android 原生文本选择。
+- 复制默认保留可见正文和 Markdown 源内容，不得复制 API 元数据、内部消息 ID、协议字段或隐藏状态标记。等 Markdown 渲染器接入后，再提供“复制 Markdown / 复制纯文本”两种格式。
+- 用户消息支持“编辑并重发”。编辑历史消息不是把文本追加到同一会话末尾：必须按 Codex App Server 的轮次边界创建新分支，从被编辑轮次之前的最后一轮继续；旧会话和旧回答必须保留。
+- 仅当消息内容能被完整重建时才允许编辑。带图片/文件/技能附件，或同一个 turn 内有多条 user 消息的情况，暂时隐藏编辑入口并说明原因，不能把附件静默丢掉。
+- 助手回复支持“重新生成回答”，通过其对应的可编辑纯文本用户消息建立分支；执行中的轮次、审批等待状态和没有明确来源消息的活动记录不能重新生成。
+- 创建分支或发送失败时保留用户草稿，且不删除原会话。长历史需要分页完整定位目标轮次和恢复分支历史。
+- 活动项和助手/用户消息是不同类型；复制执行信息时要包含命令、工作目录、状态、退出码和已有输出。
+
+实现参考：
+- Operit：`ChatArea.kt` 的消息上下文菜单、编辑并重发、回滚与复制操作：https://github.com/AAswordman/Operit/blob/main/app/src/main/java/com/ai/assistance/operit/ui/features/chat/components/ChatArea.kt
+- RikkaHub：`ChatMessage.kt` 和 `ChatMessageActions.kt` 的文本选择、复制、编辑、重新生成和分支操作：https://github.com/rikkahub/rikkahub/blob/master/app/src/main/java/me/rerere/rikkahub/ui/components/message/ChatMessage.kt
+- OpenCode：按类型组织时间线；Codex 锁定版本的 `thread/fork.lastTurnId` 是本项目实际分支接口：https://github.com/anomalyco/opencode/blob/dev/packages/session-ui/src/timeline/session-timeline-row.tsx
+
+只借鉴交互和架构，不复制上游源码或资源。Operit 使用 LGPL-3.0、RikkaHub 使用 AGPL-3.0、OpenCode 使用 MIT；任何代码移植都要先单独审查许可证和依赖义务。
+
+
+## 首次服务器/模型引导与对话时间显示
+
+- 首次准备好 ARM64 私有运行环境后，如果还没有 Codex Agent 默认服务商，显示两步引导：先填写 Responses API 服务器地址、API Key、模型 ID 和可选自定义请求头，再连接服务器读取模型目录并选择模型。
+- API Key 与自定义请求头继续通过 Android Keystore 加密保存。引导完成后才进入主界面；保存过的服务器和模型在后续启动时自动恢复。
+- MCP 页面只保留 MCP 专属操作，不放置服务商设置快捷按钮。
+- 聊天输入框与发送按钮必须保持同一行；文本输入区占据主要宽度，发送按钮使用稳定宽度，工具和回车模式放在第二行。
+- 用户消息和助手消息显示时间；助手回复结束后显示本轮实际耗时。历史时间优先使用 Codex App Server 的 `startedAtMs` / `completedAtMs`，若服务端未记录则不显示伪造的历史时间。正在进行的轮次按 `turn/started` 与 `turn/completed` 事件计算耗时。

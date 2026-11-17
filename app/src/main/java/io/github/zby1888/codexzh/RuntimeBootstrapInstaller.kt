@@ -13,6 +13,11 @@ import java.util.ArrayDeque
 import java.util.Properties
 import java.util.zip.ZipInputStream
 
+internal data class RuntimeInstallProgress(
+    val message: String,
+    val fraction: Float? = null
+)
+
 /**
  * Installs the signed APK's bundled bootstrap into app-private storage.
  * ZIP paths and symlinks are validated before they can be created.
@@ -23,7 +28,7 @@ internal class RuntimeBootstrapInstaller(
 ) {
     private val paths = manager.paths
 
-    fun install(): RuntimeStatus {
+    fun install(onProgress: (RuntimeInstallProgress) -> Unit = {}): RuntimeStatus {
         if (!BuildAbi.supportsArm64()) return manager.inspect()
 
         var backup: File? = null
@@ -32,16 +37,21 @@ internal class RuntimeBootstrapInstaller(
         val oldPrefix = File(paths.runtimeRoot, "prefix-backup")
 
         return try {
+            onProgress(RuntimeInstallProgress("正在准备应用私有目录…"))
             paths.createDirectories()
+            onProgress(RuntimeInstallProgress("正在读取并检查运行时清单…"))
             val manifest = readManifest()
             verifyManifest(manifest)
-            verifyAssetHash(manifest)
+            onProgress(RuntimeInstallProgress("正在校验内置运行环境完整性…", 0f))
+            verifyAssetHash(manifest, onProgress)
 
             deleteTreeNoFollow(staging)
             deleteTreeNoFollow(oldPrefix)
             ensureDirectory(staging)
 
-            val symlinkText = extractArchive(staging)
+            onProgress(RuntimeInstallProgress("正在展开 ARM64 运行环境…"))
+            val symlinkText = extractArchive(staging, onProgress)
+            onProgress(RuntimeInstallProgress("正在恢复运行时文件链接…"))
             restoreSymlinks(staging, symlinkText)
 
             if (paths.prefix.exists()) {
@@ -57,12 +67,17 @@ internal class RuntimeBootstrapInstaller(
             }
             switched = true
 
+            onProgress(RuntimeInstallProgress("正在检查 Codex CLI 和辅助程序…"))
             verifyInstalledFiles()
             writeRuntimeMarker(manifest)
             backup?.let { old -> runCatching { deleteTreeNoFollow(old) } }
             backup = null
 
-            manager.inspect()
+            val result = manager.inspect()
+            if (result.phase == RuntimePhase.RUNTIME_READY) {
+                onProgress(RuntimeInstallProgress("运行环境已安装，Codex CLI 启动检查通过。", 1f))
+            }
+            result
         } catch (error: Exception) {
             if (switched) {
                 runCatching { deleteTreeNoFollow(paths.prefix) }
@@ -71,10 +86,9 @@ internal class RuntimeBootstrapInstaller(
                 }
             }
             runCatching { deleteTreeNoFollow(staging) }
-            RuntimeStatus(
-                RuntimePhase.ERROR,
-                error.message?.let { "安装 ARM64 工具链失败：$it" } ?: "安装 ARM64 工具链失败。"
-            )
+            val message = error.message?.let { "安装 ARM64 工具链失败：$it" } ?: "安装 ARM64 工具链失败。"
+            onProgress(RuntimeInstallProgress(message))
+            RuntimeStatus(RuntimePhase.ERROR, message)
         }
     }
 
@@ -104,11 +118,20 @@ internal class RuntimeBootstrapInstaller(
         check(manifest.optString("sha256").matches(Regex("^[0-9a-f]{64}$"))) {
             "运行时清单 SHA-256 格式无效"
         }
+        check(
+            manifest.optJSONObject("runtimePatches")
+                ?.optString("codexAndroidCurrentExe") == REQUIRED_ANDROID_PATCH_ID
+        ) { "运行环境缺少 Android linker/current_exe 修复，拒绝安装旧版运行时" }
     }
 
-    private fun verifyAssetHash(manifest: JSONObject) {
+    private fun verifyAssetHash(
+        manifest: JSONObject,
+        onProgress: (RuntimeInstallProgress) -> Unit
+    ) {
         val digest = MessageDigest.getInstance("SHA-256")
         var byteCount = 0L
+        val expectedBytes = manifest.getLong("archiveSize")
+        var lastReportedPercent = -5
         context.assets.open(ARCHIVE_ASSET).use { input ->
             val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
             while (true) {
@@ -116,6 +139,11 @@ internal class RuntimeBootstrapInstaller(
                 if (count < 0) break
                 byteCount += count
                 digest.update(buffer, 0, count)
+                val percent = ((byteCount * 100L) / expectedBytes).toInt().coerceIn(0, 100)
+                if (percent >= lastReportedPercent + 5 || percent == 100) {
+                    lastReportedPercent = percent
+                    onProgress(RuntimeInstallProgress("正在校验内置文件 · $percent%", percent / 100f))
+                }
             }
         }
         check(byteCount == manifest.getLong("archiveSize")) { "运行时资源大小与清单不一致" }
@@ -125,7 +153,10 @@ internal class RuntimeBootstrapInstaller(
         check(actual == manifest.getString("sha256")) { "运行时资源校验失败，SHA-256 不一致" }
     }
 
-    private fun extractArchive(staging: File): String {
+    private fun extractArchive(
+        staging: File,
+        onProgress: (RuntimeInstallProgress) -> Unit
+    ): String {
         val seen = HashSet<String>()
         var totalBytes = 0L
         var entryCount = 0
@@ -136,6 +167,9 @@ internal class RuntimeBootstrapInstaller(
                 while (true) {
                     val entry = zip.nextEntry ?: break
                     entryCount++
+                    if (entryCount == 1 || entryCount % 150 == 0) {
+                        onProgress(RuntimeInstallProgress("正在展开运行环境 · 已处理 $entryCount 项文件"))
+                    }
                     check(entryCount <= MAX_ENTRIES) { "运行时文件数量超出安全限制" }
                     val relative = normalizeArchivePath(entry.name)
                     check(seen.add(relative)) { "运行时压缩包包含重复路径：$relative" }
@@ -248,10 +282,21 @@ internal class RuntimeBootstrapInstaller(
     }
 
     private fun verifyInstalledFiles() {
-        val required = listOf(paths.bash, paths.env, paths.git, paths.execPreload)
+        val required = listOf(
+            paths.bash, paths.env, paths.git, paths.execPreload,
+            paths.codex, paths.codexCodeModeHost
+        )
         val missing = required.filterNot { it.exists() }
         check(missing.isEmpty()) {
             "运行时关键文件缺失：${missing.joinToString { it.relativeTo(paths.prefix).path }}"
+        }
+        check(paths.codex.canExecute()) { "Codex CLI 没有执行权限" }
+        check(paths.codexCodeModeHost.canExecute()) { "Code Mode host 没有执行权限" }
+        val patchMarker = paths.runtimePatchMarker
+        check(patchMarker.isFile) { "私有运行环境缺少 Android Code Mode 路径修复标记" }
+        val patch = JSONObject(patchMarker.readText(Charsets.UTF_8))
+        check(patch.optString("codexAndroidCurrentExe") == REQUIRED_ANDROID_PATCH_ID) {
+            "私有运行环境中的 Android Code Mode 路径修复版本不匹配"
         }
     }
 
@@ -262,7 +307,11 @@ internal class RuntimeBootstrapInstaller(
             setProperty("applicationId", context.packageName)
             setProperty("sha256", manifest.getString("sha256"))
             setProperty("sourceRef", manifest.optString("sourceRef"))
-            setProperty("installedAtVersion", "1")
+            setProperty(
+                "codexAndroidCurrentExe",
+                manifest.optJSONObject("runtimePatches")?.optString("codexAndroidCurrentExe").orEmpty()
+            )
+            setProperty("installedAtVersion", "2")
         }
         val temporary = File(paths.runtimeRoot, ".runtime.properties.tmp")
         temporary.outputStream().buffered().use { properties.store(it, "Codex Zh Android runtime") }
@@ -350,6 +399,7 @@ internal class RuntimeBootstrapInstaller(
         private const val ARCHIVE_ASSET = "runtime/bootstrap-aarch64.zip"
         private const val MANIFEST_ASSET = "runtime/bootstrap-manifest.json"
         private const val SYMLINKS_FILE = "SYMLINKS.txt"
+        private const val REQUIRED_ANDROID_PATCH_ID = "termux-proc-self-exe-v1"
         private const val MAX_ENTRIES = 80_000
         // The pinned Codex 0.169.0 ARM64 executable in the shipped bootstrap is
         // 202,819,272 bytes (about 193.4 MiB). 128 MiB rejected the valid binary.

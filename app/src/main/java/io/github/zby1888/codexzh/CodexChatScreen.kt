@@ -1,8 +1,11 @@
 package io.github.zby1888.codexzh
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +25,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -53,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -64,13 +69,21 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 internal data class CodexChatEntry(
     val id: String,
     val title: String,
     val text: String,
     val isUser: Boolean = false,
-    val isActivity: Boolean = false
+    val isActivity: Boolean = false,
+    val turnId: String? = null,
+    val canEdit: Boolean = false,
+    val createdAtMillis: Long? = System.currentTimeMillis(),
+    val completedAtMillis: Long? = null,
+    val turnDurationMillis: Long? = null
 )
 
 internal data class CodexModelOption(
@@ -127,7 +140,11 @@ internal data class CodexPendingApproval(
             method == "item/fileChange/requestApproval"
 }
 
-internal class CodexChatUiState {
+internal class CodexChatUiState(context: Context) {
+    private val modelPreferences = context.applicationContext.getSharedPreferences(
+        "codex_chat_model",
+        Context.MODE_PRIVATE
+    )
     var controller by mutableStateOf<CodexAgentController?>(null)
     var threadId by mutableStateOf<String?>(null)
     var workingDirectory by mutableStateOf<String?>(null)
@@ -138,8 +155,12 @@ internal class CodexChatUiState {
     val mcpServers = mutableStateListOf<CodexMcpServerSummary>()
     val mcpOAuthMessages = mutableStateMapOf<String, String>()
     val models = mutableStateListOf<CodexModelOption>()
-    var selectedModelId by mutableStateOf<String?>(null)
-    var selectedReasoningEffort by mutableStateOf<String?>(null)
+    var selectedModelId by mutableStateOf(modelPreferences.getString("selected_model_id", null))
+    var selectedReasoningEffort by mutableStateOf(
+        modelPreferences.getString("selected_reasoning_effort", null)
+    )
+    val turnDurationsMillis = mutableStateMapOf<String, Long>()
+    var activeTurnStartedAtMillis by mutableStateOf<Long?>(null)
     var isWorking by mutableStateOf(false)
     var isSubmitting by mutableStateOf(false)
     var status by mutableStateOf("尚未连接 Codex")
@@ -280,11 +301,103 @@ internal class CodexChatUiState {
         }
     }
 
-    fun upsert(id: String, title: String, text: String, isActivity: Boolean = false) {
+    fun appendCommandOutput(itemId: String, delta: String) {
+        if (delta.isEmpty()) return
+        val entryId = "command:$itemId"
+        val index = entries.indexOfFirst { it.id == entryId }
+        val current = if (index >= 0) entries[index] else null
+        val oldText = current?.text.orEmpty()
+        val marker = "\n\n输出：\n"
+        val splitAt = oldText.indexOf(marker)
+        val summary = if (splitAt >= 0) oldText.substring(0, splitAt) else oldText
+        val previousOutput = if (splitAt >= 0) oldText.substring(splitAt + marker.length) else ""
+        val nextText = (summary.ifBlank { "命令执行中" }) + marker + previousOutput + delta
+        val next = current?.copy(text = nextText, isActivity = true)
+            ?: CodexChatEntry(entryId, "命令执行", nextText, isActivity = true)
+        if (index >= 0) entries[index] = next else entries.add(next)
+    }
+
+    fun bindEntryToTurn(id: String, turnId: String, canEdit: Boolean) {
         val index = entries.indexOfFirst { it.id == id }
-        val next = if (index < 0) CodexChatEntry(id, title, text, isActivity = isActivity)
-        else entries[index].copy(title = title, text = text, isActivity = isActivity)
+        if (index >= 0) {
+            entries[index] = entries[index].copy(turnId = turnId, canEdit = canEdit)
+        }
+    }
+
+    fun upsert(
+        id: String,
+        title: String,
+        text: String,
+        isActivity: Boolean = false,
+        turnId: String? = null,
+        canEdit: Boolean? = null,
+        startedAtMillis: Long? = null,
+        completedAtMillis: Long? = null
+    ) {
+        if (isActivity && text.isBlank()) return
+        val index = entries.indexOfFirst { it.id == id }
+        val previous = entries.getOrNull(index)
+        val startedAt = startedAtMillis ?: previous?.createdAtMillis
+        val completedAt = completedAtMillis ?: previous?.completedAtMillis
+        val duration = if (startedAt != null && completedAt != null && completedAt >= startedAt) {
+            completedAt - startedAt
+        } else previous?.turnDurationMillis
+        val next = if (previous == null) {
+            CodexChatEntry(
+                id = id,
+                title = title,
+                text = text,
+                isActivity = isActivity,
+                turnId = turnId,
+                canEdit = canEdit ?: false,
+                createdAtMillis = startedAt,
+                completedAtMillis = completedAt,
+                turnDurationMillis = duration
+            )
+        } else {
+            previous.copy(
+                title = title,
+                text = text,
+                isActivity = isActivity,
+                turnId = turnId ?: previous.turnId,
+                canEdit = canEdit ?: previous.canEdit,
+                createdAtMillis = startedAt,
+                completedAtMillis = completedAt,
+                turnDurationMillis = duration
+            )
+        }
         if (index < 0) entries.add(next) else entries[index] = next
+    }
+
+    fun selectModelId(modelId: String) {
+        selectedModelId = modelId.trim().takeIf { it.isNotBlank() }
+        selectedReasoningEffort = null
+        persistModelSelection()
+    }
+
+    fun recordTurnDuration(turnId: String, completedAtMillis: Long = System.currentTimeMillis()) {
+        val startedAt = activeTurnStartedAtMillis
+        if (startedAt != null && completedAtMillis >= startedAt) {
+            val duration = completedAtMillis - startedAt
+            turnDurationsMillis[turnId] = duration
+            val index = entries.indexOfLast {
+                it.turnId == turnId && !it.isUser && !it.isActivity
+            }
+            if (index >= 0) {
+                entries[index] = entries[index].copy(
+                    completedAtMillis = completedAtMillis,
+                    turnDurationMillis = duration
+                )
+            }
+        }
+        activeTurnStartedAtMillis = null
+    }
+
+    private fun persistModelSelection() {
+        modelPreferences.edit()
+            .putString("selected_model_id", selectedModelId)
+            .putString("selected_reasoning_effort", selectedReasoningEffort)
+            .apply()
     }
 
     fun replaceModels(response: JSONObject) {
@@ -320,11 +433,14 @@ internal class CodexChatUiState {
         val selected = models.firstOrNull { it.id == selectedModelId }
             ?: models.firstOrNull { it.isDefault }
             ?: models.firstOrNull()
-        selectedModelId = selected?.id
-        if (selected != null && selectedReasoningEffort?.let { it in selected.reasoningEfforts } != true) {
-            selectedReasoningEffort = selected.defaultReasoningEffort.ifBlank {
-                selected.reasoningEfforts.firstOrNull()
+        if (selected != null) {
+            selectedModelId = selected.id
+            if (selectedReasoningEffort?.let { it in selected.reasoningEfforts } != true) {
+                selectedReasoningEffort = selected.defaultReasoningEffort.ifBlank {
+                    selected.reasoningEfforts.firstOrNull()
+                }
             }
+            persistModelSelection()
         }
     }
 
@@ -333,6 +449,12 @@ internal class CodexChatUiState {
         selectedReasoningEffort = model.defaultReasoningEffort.ifBlank {
             model.reasoningEfforts.firstOrNull()
         }
+        persistModelSelection()
+    }
+
+    fun selectReasoningEffort(effort: String) {
+        selectedReasoningEffort = effort
+        persistModelSelection()
     }
 
     fun replaceRecentThreads(response: JSONObject) {
@@ -358,14 +480,31 @@ internal class CodexChatUiState {
     fun restoreHistory(response: JSONObject) {
         entries.clear()
         val data = response.optJSONArray("data") ?: return
+        val userMessagesPerTurn = mutableMapOf<String, Int>()
+        for (index in 0 until data.length()) {
+            val entry = data.optJSONObject(index) ?: continue
+            val item = entry.optJSONObject("item") ?: continue
+            if (item.optString("type") == "userMessage") {
+                val turnId = entry.optString("turnId").takeIf { it.isNotBlank() }
+                if (turnId != null) userMessagesPerTurn[turnId] = (userMessagesPerTurn[turnId] ?: 0) + 1
+            }
+        }
         for (index in 0 until data.length()) {
             val entry = data.optJSONObject(index) ?: continue
             val item = entry.optJSONObject("item") ?: continue
             val id = item.optString("id")
             if (id.isBlank()) continue
+            val itemTurnId = entry.optString("turnId").takeIf { it.isNotBlank() }
+            val itemStartedAt = entry.optLong("startedAtMs", item.optLong("startedAtMs", 0L))
+                .takeIf { it > 0L }
+            val itemCompletedAt = entry.optLong("completedAtMs", item.optLong("completedAtMs", 0L))
+                .takeIf { it > 0L }
             when (item.optString("type")) {
                 "userMessage" -> {
                     val content = item.optJSONArray("content") ?: continue
+                    val isPlainTextOnly = (0 until content.length()).all { contentIndex ->
+                        content.optJSONObject(contentIndex)?.optString("type") == "text"
+                    }
                     val text = buildList {
                         for (contentIndex in 0 until content.length()) {
                             val part = content.optJSONObject(contentIndex) ?: continue
@@ -377,11 +516,27 @@ internal class CodexChatUiState {
                             }
                         }
                     }.filter { it.isNotBlank() }.joinToString("\n")
-                    if (text.isNotBlank()) upsert("history:user:$id", "你", text)
+                    if (text.isNotBlank()) {
+                        upsert(
+                            "history:user:$id", "你", text,
+                            turnId = itemTurnId,
+                            startedAtMillis = itemStartedAt,
+                            completedAtMillis = itemCompletedAt,
+                            canEdit = isPlainTextOnly && itemTurnId != null &&
+                                userMessagesPerTurn[itemTurnId] == 1
+                        )
+                    }
                 }
                 "agentMessage" -> {
                     val text = item.optString("text")
-                    if (text.isNotBlank()) upsert("history:assistant:$id", "Codex", text)
+                    if (text.isNotBlank()) {
+                        upsert(
+                            "history:assistant:$id", "Codex", text,
+                            turnId = itemTurnId,
+                            startedAtMillis = itemStartedAt,
+                            completedAtMillis = itemCompletedAt
+                        )
+                    }
                 }
                 "commandExecution" -> {
                     val text = buildString {
@@ -391,7 +546,12 @@ internal class CodexChatUiState {
                         val output = item.optString("aggregatedOutput")
                         if (output.isNotBlank()) append("\n\n").append(output)
                     }
-                    upsert("history:command:$id", "命令执行", text, true)
+                    upsert(
+                        "history:command:$id", "命令执行", text, true,
+                        turnId = itemTurnId,
+                        startedAtMillis = itemStartedAt,
+                        completedAtMillis = itemCompletedAt
+                    )
                 }
                 "fileChange" -> {
                     val changes = item.optJSONArray("changes")
@@ -403,24 +563,46 @@ internal class CodexChatUiState {
                             }
                         }
                     }.filter { it.isNotBlank() }
-                    upsert("history:file:$id", "文件修改", paths.joinToString("\n"), true)
+                    upsert(
+                        "history:file:$id", "文件修改", paths.joinToString("\n"), true,
+                        turnId = itemTurnId,
+                        startedAtMillis = itemStartedAt,
+                        completedAtMillis = itemCompletedAt
+                    )
                 }
                 "mcpToolCall" -> upsert(
                     "history:mcp:$id",
                     "MCP 工具",
                     "${item.optString("server")} / ${item.optString("tool")}\n状态：${item.optString("status")}",
-                    true
+                    true,
+                    turnId = itemTurnId,
+                    startedAtMillis = itemStartedAt,
+                    completedAtMillis = itemCompletedAt
                 )
-                "plan" -> upsert("history:plan:$id", "执行计划", item.optString("text"), true)
+                "plan" -> upsert(
+                    "history:plan:$id", "执行计划", item.optString("text"), true,
+                    turnId = itemTurnId,
+                    startedAtMillis = itemStartedAt,
+                    completedAtMillis = itemCompletedAt
+                )
             }
         }
     }
 
     fun appendCompletedTurnItems(turn: JSONObject) {
         val items = turn.optJSONArray("items") ?: return
+        val turnId = turn.optString("id").takeIf { it.isNotBlank() }
         for (index in 0 until items.length()) {
             val item = items.optJSONObject(index) ?: continue
-            handleItem(item, started = false)
+            val startedAt = item.optLong("startedAtMs", 0L).takeIf { it > 0L }
+            val completedAt = item.optLong("completedAtMs", 0L).takeIf { it > 0L }
+            handleItem(
+                item,
+                started = false,
+                turnId = turnId,
+                startedAtMillis = startedAt,
+                completedAtMillis = completedAt
+            )
         }
     }
 
@@ -453,7 +635,18 @@ internal class CodexChatUiState {
         for (index in 0 until data.length()) {
             val entry = data.optJSONObject(index) ?: continue
             val item = entry.optJSONObject("item") ?: continue
-            handleItem(item, started = false)
+            val turnId = entry.optString("turnId").takeIf { it.isNotBlank() }
+            val startedAt = entry.optLong("startedAtMs", item.optLong("startedAtMs", 0L))
+                .takeIf { it > 0L }
+            val completedAt = entry.optLong("completedAtMs", item.optLong("completedAtMs", 0L))
+                .takeIf { it > 0L }
+            handleItem(
+                item,
+                started = false,
+                turnId = turnId,
+                startedAtMillis = startedAt,
+                completedAtMillis = completedAt
+            )
         }
     }
 
@@ -508,6 +701,7 @@ internal class CodexChatUiState {
             "turn/started" -> {
                 val turn = params.optJSONObject("turn") ?: JSONObject()
                 activeTurnId = turn.optString("id").takeIf { it.isNotBlank() }
+                activeTurnStartedAtMillis = System.currentTimeMillis()
                 isWorking = true
                 error = null
                 status = "Codex 已开始执行任务"
@@ -518,6 +712,7 @@ internal class CodexChatUiState {
                 appendCompletedTurnItems(turn)
                 val result = turn.optString("status").ifBlank { "completed" }
                 val failure = describeTurnError(turn)
+                turn.optString("id").takeIf { it.isNotBlank() }?.let { recordTurnDuration(it) }
                 isWorking = false
                 activeTurnId = null
                 if (result == "failed") {
@@ -545,7 +740,7 @@ internal class CodexChatUiState {
             }
             "item/commandExecution/outputDelta" -> {
                 val itemId = params.optString("itemId")
-                append("command:$itemId", "命令输出", params.optString("delta"), true)
+                appendCommandOutput(itemId, params.optString("delta"))
             }
             "item/started" -> handleItem(params.optJSONObject("item"), started = true)
             "item/completed" -> handleItem(params.optJSONObject("item"), started = false)
@@ -595,32 +790,64 @@ internal class CodexChatUiState {
         }
     }
 
-    private fun handleItem(item: JSONObject?, started: Boolean) {
+    private fun handleItem(
+        item: JSONObject?,
+        started: Boolean,
+        turnId: String? = activeTurnId,
+        startedAtMillis: Long? = null,
+        completedAtMillis: Long? = null
+    ) {
         if (item == null) return
         val id = item.optString("id")
         if (id.isBlank()) return
         when (item.optString("type")) {
             "agentMessage" -> {
                 val text = item.optString("text")
-                if (text.isNotBlank()) upsert("assistant:$id", "Codex", text)
+                if (text.isNotBlank()) {
+                    upsert(
+                        "assistant:$id", "Codex", text,
+                        turnId = turnId,
+                        startedAtMillis = startedAtMillis ?: if (started) System.currentTimeMillis() else null,
+                        completedAtMillis = completedAtMillis
+                    )
+                }
             }
             "commandExecution" -> {
                 val command = item.optString("command")
                 val cwd = item.optString("cwd")
-                val state = item.optString("status").ifBlank {
+                val rawState = item.optString("status").ifBlank {
                     if (started) "inProgress" else "completed"
                 }
-                val output = item.optString("aggregatedOutput")
-                val details = buildString {
-                    append(command.ifBlank { "正在执行命令" })
-                    if (cwd.isNotBlank()) append("\n目录：").append(cwd)
-                    append("\n状态：").append(state)
-                    item.optInt("exitCode", Int.MIN_VALUE).takeIf { it != Int.MIN_VALUE }?.let {
-                        append("\n退出码：").append(it)
-                    }
-                    if (output.isNotBlank()) append("\n\n").append(output)
+                val state = when (rawState) {
+                    "inProgress", "running" -> "执行中"
+                    "completed", "succeeded" -> "已完成"
+                    "failed" -> "失败"
+                    "declined" -> "已拒绝"
+                    "interrupted" -> "已中断"
+                    else -> rawState
                 }
-                upsert("command:$id", "命令执行", details, true)
+                val previousText = entries.firstOrNull { it.id == "command:$id" }?.text.orEmpty()
+                val outputMarker = "\n\n输出：\n"
+                val streamedOutput = previousText.substringAfter(outputMarker, "")
+                val output = item.optString("aggregatedOutput").ifBlank { streamedOutput }
+                val exitCode = item.optInt("exitCode", Int.MIN_VALUE)
+                if (command.isNotBlank() || cwd.isNotBlank() || rawState.isNotBlank() ||
+                    output.isNotBlank() || exitCode != Int.MIN_VALUE
+                ) {
+                    val details = buildString {
+                        append(command.ifBlank { "命令执行" })
+                        if (cwd.isNotBlank()) append("\n目录：").append(cwd)
+                        if (state.isNotBlank()) append("\n状态：").append(state)
+                        if (exitCode != Int.MIN_VALUE) append("\n退出码：").append(exitCode)
+                        if (output.isNotBlank()) append(outputMarker).append(output)
+                    }
+                    upsert(
+                        "command:$id", "命令执行", details, true,
+                        turnId = turnId,
+                        startedAtMillis = startedAtMillis ?: if (started) System.currentTimeMillis() else null,
+                        completedAtMillis = completedAtMillis
+                    )
+                }
             }
             "fileChange" -> {
                 val changes = item.optJSONArray("changes")
@@ -632,28 +859,45 @@ internal class CodexChatUiState {
                         }
                     }
                 }.filter { it.isNotBlank() }
-                upsert(
-                    "file:$id",
-                    "文件修改",
-                    if (paths.isEmpty()) "文件修改状态：${item.optString("status")}"
-                    else paths.joinToString("\n"),
-                    true
-                )
+                val fileStatus = item.optString("status")
+                if (paths.isNotEmpty() || fileStatus.isNotBlank()) {
+                    val details = if (paths.isEmpty()) "文件修改 · $fileStatus"
+                        else paths.joinToString("\n")
+                    upsert(
+                        "file:$id", "文件修改", details, true,
+                        turnId = turnId,
+                        startedAtMillis = startedAtMillis ?: if (started) System.currentTimeMillis() else null,
+                        completedAtMillis = completedAtMillis
+                    )
+                }
             }
-            "mcpToolCall" -> upsert(
-                "mcp:$id",
-                "MCP 工具",
-                "${item.optString("server")} / ${item.optString("tool")}\n状态：${item.optString("status")}",
-                true
-            )
+            "mcpToolCall" -> {
+                val server = item.optString("server")
+                val tool = item.optString("tool")
+                val state = item.optString("status")
+                if (server.isNotBlank() || tool.isNotBlank() || state.isNotBlank()) {
+                    val details = listOf(
+                        listOf(server, tool).filter { it.isNotBlank() }.joinToString(" / "),
+                        state.takeIf { it.isNotBlank() }?.let { "状态：$it" }
+                    ).filterNotNull().filter { it.isNotBlank() }.joinToString("\n")
+                    upsert(
+                        "mcp:$id", "MCP 工具", details, true,
+                        turnId = turnId,
+                        startedAtMillis = startedAtMillis ?: if (started) System.currentTimeMillis() else null,
+                        completedAtMillis = completedAtMillis
+                    )
+                }
+            }
             "plan" -> {
                 val text = item.optString("text")
-                if (text.isNotBlank()) upsert("plan:$id", "执行计划", text, true)
+                if (text.isNotBlank()) upsert(
+                    "plan:$id", "执行计划", text, true,
+                    turnId = turnId,
+                    startedAtMillis = startedAtMillis ?: if (started) System.currentTimeMillis() else null,
+                    completedAtMillis = completedAtMillis
+                )
             }
-            else -> {
-                val type = item.optString("type").ifBlank { "未知操作" }
-                if (started) upsert("item:$id", "执行步骤", type, true)
-            }
+            else -> Unit
         }
     }
 }
@@ -671,6 +915,23 @@ internal fun CodexChatScreen(
     val runtimeManager = remember(context) { RuntimeManager(context) }
     val providerRepository = remember(context) { ProviderRepository(context) }
     var prompt by remember { mutableStateOf("") }
+    var editingEntry by remember { mutableStateOf<CodexChatEntry?>(null) }
+    var autoStartAttempt by remember { mutableStateOf(0) }
+    val clipboardManager = remember(context) {
+        context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    }
+    fun copyChatEntry(entry: CodexChatEntry) {
+        clipboardManager.setPrimaryClip(ClipData.newPlainText(entry.title, entry.text))
+        state.status = "已复制到剪贴板"
+    }
+    fun beginEditing(entry: CodexChatEntry) {
+        if (!entry.isUser || !entry.canEdit || entry.turnId.isNullOrBlank() ||
+            state.threadId == null || state.isWorking || state.isSubmitting
+        ) return
+        editingEntry = entry
+        prompt = entry.text
+        state.status = "已载入历史消息；发送后会从该消息之前创建新分支"
+    }
     var enterSendsMessage by remember(context) {
         mutableStateOf(
             context.getSharedPreferences("codex_chat_ui", Context.MODE_PRIVATE)
@@ -729,6 +990,40 @@ internal fun CodexChatScreen(
         }.also {
             state.controller = it
             state.status = "已连接 Codex App Server"
+        }
+    }
+
+    LaunchedEffect(autoStartAttempt) {
+        if (state.controller?.isConnected == true && state.models.isNotEmpty()) {
+            return@LaunchedEffect
+        }
+        state.error = null
+        state.isSubmitting = true
+        state.status = "正在自动启动 Codex App Server…"
+        try {
+            val agent = ensureAgent()
+            val modelsResponse = withContext(Dispatchers.IO) {
+                agent.listModels(includeHidden = false)
+            }
+            state.replaceModels(modelsResponse)
+            try {
+                val threads = withContext(Dispatchers.IO) {
+                    agent.listThreads(archived = false, limit = 30)
+                }
+                state.replaceRecentThreads(threads)
+            } catch (_: Exception) {
+                // Model loading is the essential startup step; history is optional.
+            }
+            state.status = if (state.selectedModelId.isNullOrBlank()) {
+                "Codex 已启动，请选择一个可用模型"
+            } else {
+                "Codex 已自动启动 · 已恢复上次模型选择"
+            }
+        } catch (error: Exception) {
+            state.error = error.message?.take(600) ?: "Codex 自动启动失败"
+            state.status = "Codex 自动启动失败，请检查服务商设置后重试"
+        } finally {
+            state.isSubmitting = false
         }
     }
 
@@ -1166,6 +1461,7 @@ internal fun CodexChatScreen(
                                     itemSyncFailure = failure.message ?: "未知错误"
                                 }
                             }
+                            state.recordTurnDuration(turnId)
                             state.isWorking = false
                             state.activeTurnId = null
                             val failure = state.describeTurnError(turn)
@@ -1221,9 +1517,10 @@ internal fun CodexChatScreen(
             state.isSubmitting = true
             state.error = null
             state.status = "正在连接 Codex 并提交消息…"
+            val userEntryId = "user:${System.nanoTime()}"
             state.entries.add(
                 CodexChatEntry(
-                    id = "user:${System.nanoTime()}",
+                    id = userEntryId,
                     title = "你",
                     text = text,
                     isUser = true
@@ -1249,10 +1546,12 @@ internal fun CodexChatScreen(
                     withContext(Dispatchers.IO) {
                         agent.steerTurn(threadId, activeTurn, text)
                     }
+                    state.bindEntryToTurn(userEntryId, activeTurn, canEdit = false)
                     state.status = "补充指令已发送，正在等待 Codex 处理"
                 } else {
                     val cwd = state.workingDirectory ?: defaultWorkspace(runtimeManager.paths.home)
                     state.isWorking = true
+                    state.activeTurnStartedAtMillis = System.currentTimeMillis()
                     val turn = withContext(Dispatchers.IO) {
                         agent.startTurn(
                             threadId,
@@ -1263,6 +1562,7 @@ internal fun CodexChatScreen(
                         )
                     }
                     if (state.isWorking) state.activeTurnId = turn.id
+                    state.bindEntryToTurn(userEntryId, turn.id, canEdit = true)
                     state.status = "消息已提交，正在等待 Codex 回复"
                     monitorTurn(agent, threadId, turn.id)
 
@@ -1270,8 +1570,164 @@ internal fun CodexChatScreen(
             } catch (error: Exception) {
                 state.isWorking = false
                 state.activeTurnId = null
+                state.activeTurnStartedAtMillis = null
                 state.error = error.message?.take(600) ?: "连接 Codex 时发生未知错误"
                 state.status = "消息未能完成提交"
+            } finally {
+                state.isSubmitting = false
+            }
+        }
+    }
+
+    fun editAndResend(text: String, edited: CodexChatEntry) {
+        if (text.isBlank() || edited.turnId.isNullOrBlank() || state.isWorking || state.isSubmitting) return
+        val sourceThreadId = state.threadId ?: return
+        val targetTurnId = edited.turnId
+        scope.launch {
+            state.isSubmitting = true
+            state.error = null
+            state.status = "正在定位原消息，并准备独立分支…"
+            try {
+                val agent = ensureAgent()
+                val turns = mutableListOf<JSONObject>()
+                var cursor: String? = null
+                var allTurnsLoaded = false
+                var pageCount = 0
+                while (pageCount < 50) {
+                    val page = withContext(Dispatchers.IO) {
+                        agent.listTurns(
+                            sourceThreadId,
+                            cursor = cursor,
+                            limit = 200,
+                            sortDirection = "asc"
+                        )
+                    }
+                    val data = page.optJSONArray("data")
+                    if (data != null) {
+                        for (index in 0 until data.length()) {
+                            data.optJSONObject(index)?.let(turns::add)
+                        }
+                    }
+                    val nextCursor = page.optString("nextCursor")
+                        .takeIf { it.isNotBlank() && it != "null" }
+                    if (nextCursor == null) {
+                        allTurnsLoaded = true
+                        break
+                    }
+                    cursor = nextCursor
+                    pageCount++
+                }
+                check(allTurnsLoaded) {
+                    "会话历史过长，无法完整定位要编辑的消息；原会话没有被修改。"
+                }
+
+                val targetIndex = turns.indexOfFirst { it.optString("id") == targetTurnId }
+                check(targetIndex >= 0) {
+                    "找不到这条消息所属的轮次；原会话没有被修改，请刷新历史记录后重试。"
+                }
+                val previousTurnId = turns.getOrNull(targetIndex - 1)
+                    ?.optString("id")
+                    ?.takeIf { it.isNotBlank() }
+                val cwd = state.workingDirectory ?: defaultWorkspace(runtimeManager.paths.home)
+
+                val branch = if (previousTurnId != null) {
+                    withContext(Dispatchers.IO) {
+                        agent.forkThread(sourceThreadId, previousTurnId)
+                    }
+                } else {
+                    // Editing the first user turn has no preceding turn to fork from.
+                    // Start a new thread and keep the original first-turn conversation intact.
+                    withContext(Dispatchers.IO) {
+                        agent.startThread(cwd, model = state.selectedModelId)
+                    }
+                }
+
+                val branchHistory = if (previousTurnId != null) {
+                    withContext(Dispatchers.IO) {
+                        val allItems = JSONArray()
+                        var itemCursor: String? = null
+                        var allItemsLoaded = false
+                        var itemPageCount = 0
+                        while (itemPageCount < 50) {
+                            val page = agent.listItems(
+                                branch.id,
+                                cursor = itemCursor,
+                                limit = 200,
+                                sortDirection = "asc"
+                            )
+                            val pageData = page.optJSONArray("data")
+                            if (pageData != null) {
+                                for (index in 0 until pageData.length()) {
+                                    pageData.optJSONObject(index)?.let(allItems::put)
+                                }
+                            }
+                            val nextCursor = page.optString("nextCursor")
+                                .takeIf { it.isNotBlank() && it != "null" }
+                            if (nextCursor == null) {
+                                allItemsLoaded = true
+                                break
+                            }
+                            itemCursor = nextCursor
+                            itemPageCount++
+                        }
+                        check(allItemsLoaded) {
+                            "分支历史记录过长，无法完整恢复；原会话没有被修改。"
+                        }
+                        JSONObject().put("data", allItems)
+                    }
+                } else {
+                    JSONObject().put("data", JSONArray())
+                }
+
+                state.threadId = branch.id
+                state.workingDirectory = cwd
+                state.activeTurnId = null
+                state.isWorking = false
+                state.pendingApproval = null
+                state.pendingUserInput = null
+                state.userInputAnswers.clear()
+                state.showRecentThreads = false
+                state.restoreHistory(branchHistory)
+                // Once the fork exists, a retry after a send failure must continue on
+                // this new branch as a normal draft, not attempt to fork the old turn again.
+                editingEntry = null
+
+                val replacementEntryId = "user:${System.nanoTime()}"
+                state.entries.add(
+                    CodexChatEntry(
+                        id = replacementEntryId,
+                        title = "你",
+                        text = text,
+                        isUser = true
+                    )
+                )
+                state.isWorking = true
+                state.status = "已创建新分支，正在重新发送修改后的消息…"
+                val turn = withContext(Dispatchers.IO) {
+                    agent.startTurn(
+                        branch.id,
+                        text,
+                        cwd,
+                        model = state.selectedModelId,
+                        effort = state.selectedReasoningEffort
+                    )
+                }
+                state.bindEntryToTurn(replacementEntryId, turn.id, canEdit = true)
+                state.activeTurnId = turn.id
+                editingEntry = null
+                prompt = ""
+                state.status = "修改后的消息已发送；原会话仍保留在历史记录中"
+                runCatching {
+                    val recent = withContext(Dispatchers.IO) { agent.listThreads(limit = 30) }
+                    state.replaceRecentThreads(recent)
+                }
+                monitorTurn(agent, branch.id, turn.id)
+            } catch (error: Exception) {
+                state.isWorking = false
+                state.activeTurnId = null
+                state.error = error.message?.take(600) ?: "编辑并重发失败"
+                state.status = "编辑重发未完成；原会话不会被覆盖"
+                prompt = text
             } finally {
                 state.isSubmitting = false
             }
@@ -1281,9 +1737,14 @@ internal fun CodexChatScreen(
     fun submitPrompt() {
         val text = prompt.trim()
         if (text.isBlank() || state.isSubmitting) return
-        prompt = ""
         followLatestMessage = true
-        connectAndSend(text)
+        val selectedForEdit = editingEntry
+        if (selectedForEdit != null) {
+            editAndResend(text, selectedForEdit)
+        } else {
+            prompt = ""
+            connectAndSend(text)
+        }
     }
 
     fun submitUserInput() {
@@ -1796,7 +2257,7 @@ internal fun CodexChatScreen(
                                 DropdownMenuItem(
                                     text = { Text(effort) },
                                     onClick = {
-                                        state.selectedReasoningEffort = effort
+                                        state.selectReasoningEffort(effort)
                                         effortMenuExpanded = false
                                     }
                                 )
@@ -1851,6 +2312,24 @@ internal fun CodexChatScreen(
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2
             )
+            if (state.error != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            state.error = null
+                            autoStartAttempt++
+                        },
+                        enabled = !state.isSubmitting && !state.isWorking
+                    ) { Text("重新连接 Codex") }
+                    OutlinedButton(
+                        onClick = onOpenProviders,
+                        enabled = !state.isSubmitting
+                    ) { Text("服务商设置") }
+                }
+            }
         if (showWorkspacePicker) {
             AlertDialog(
                 onDismissRequest = { if (!state.isSubmitting) showWorkspacePicker = false },
@@ -2039,7 +2518,7 @@ internal fun CodexChatScreen(
             if (state.entries.isEmpty()) {
                 item {
                     Text(
-                        "这里会显示 Codex 的回复、执行步骤、命令输出和文件变更。\n首次使用前，请先安装私有运行环境并配置 Responses API 服务商。",
+                        "这里会显示 Codex 的回复、命令执行和文件变更。\n首次启动环境准备完成后，先在服务商设置中添加 Responses API 兼容的服务商。",
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }
@@ -2049,75 +2528,197 @@ internal fun CodexChatScreen(
                     entry.isUser -> {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = androidx.compose.ui.Alignment.Bottom
                         ) {
-                            Surface(
-                                modifier = Modifier.widthIn(max = 340.dp),
-                                color = MaterialTheme.colorScheme.secondaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                shape = RoundedCornerShape(20.dp)
-                            ) {
-                                Text(
-                                    entry.text,
-                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
+                            Column(horizontalAlignment = androidx.compose.ui.Alignment.End) {
+                                Surface(
+                                    modifier = Modifier.widthIn(max = 340.dp),
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    shape = RoundedCornerShape(20.dp)
+                                ) {
+                                    SelectionContainer {
+                                        Text(
+                                            entry.text,
+                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    }
+                                }
+                                entry.createdAtMillis?.let { timestamp ->
+                                    Text(
+                                        formatMessageTime(timestamp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(top = 3.dp, end = 8.dp)
+                                    )
+                                }
                             }
+                            ChatMessageActionMenu(
+                                onCopy = { copyChatEntry(entry) },
+                                onEditAndResend = if (entry.canEdit && !state.isWorking && !state.isSubmitting) {
+                                    { beginEditing(entry) }
+                                } else null
+                            )
                         }
                     }
                     entry.isActivity -> {
                         var expanded by remember(entry.id) { mutableStateOf(false) }
+                        val lines = entry.text.lineSequence().map { it.trim() }
+                            .filter { it.isNotBlank() }.toList()
+                        val preview = lines.firstOrNull().orEmpty()
+                        val statusLine = lines.firstOrNull { it.startsWith("状态：") }
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            shape = RoundedCornerShape(14.dp)
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.38f),
+                            shape = RoundedCornerShape(10.dp)
                         ) {
-                            Column(Modifier.padding(10.dp)) {
-                                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Column(
+                                Modifier.fillMaxWidth()
+                                    .clickable { expanded = !expanded }
+                                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                                ) {
                                     Text(
                                         entry.title,
-                                        modifier = Modifier.weight(1f),
-                                        style = MaterialTheme.typography.labelLarge,
+                                        style = MaterialTheme.typography.labelMedium,
                                         fontWeight = FontWeight.SemiBold
                                     )
-                                    TextButton(onClick = { expanded = !expanded }) {
-                                        Text(if (expanded) "收起" else "详情")
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        preview,
+                                        modifier = Modifier.weight(1f),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (statusLine != null) {
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            statusLine.removePrefix("状态："),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    ChatMessageActionMenu(
+                                        onCopy = { copyChatEntry(entry) }
+                                    )
+                                    Text(
+                                        if (expanded) "⌃" else "⌄",
+                                        modifier = Modifier.padding(start = 6.dp),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                if (expanded) {
+                                    SelectionContainer {
+                                        Text(
+                                            entry.text,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
                                 }
-                                Text(
-                                    if (expanded || entry.text.length <= 220) entry.text else entry.text.take(220) + "…",
-                                    style = MaterialTheme.typography.bodySmall
-                                )
                             }
                         }
                     }
                     else -> {
+                        val sourcePrompt = entry.turnId?.let { turnId ->
+                            state.entries.firstOrNull {
+                                it.isUser && it.turnId == turnId && it.canEdit
+                            }
+                        }
                         Column(
                             Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Text(
-                                entry.title.ifBlank { "Codex" },
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Text(entry.text, style = MaterialTheme.typography.bodyMedium)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    entry.title.ifBlank { "Codex" },
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                entry.createdAtMillis?.let { timestamp ->
+                                    Text(
+                                        formatMessageTime(timestamp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                ChatMessageActionMenu(
+                                    onCopy = { copyChatEntry(entry) },
+                                    onRegenerate = if (sourcePrompt != null &&
+                                        !state.isWorking && !state.isSubmitting
+                                    ) {
+                                        { editAndResend(sourcePrompt.text, sourcePrompt) }
+                                    } else null
+                                )
+                            }
+                            SelectionContainer {
+                                Text(entry.text, style = MaterialTheme.typography.bodyMedium)
+                            }
+                            val turnDuration = entry.turnDurationMillis
+                                ?: entry.turnId?.let { state.turnDurationsMillis[it] }
+                            turnDuration?.let {
+                                Text(
+                                    "本轮耗时：${formatElapsedTime(it)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }
             }
         }
 
+        editingEntry?.let { selected ->
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("正在编辑历史消息", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "发送后会从这条消息之前创建新分支，原会话不会被删除。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    TextButton(
+                        onClick = {
+                            editingEntry = null
+                            prompt = ""
+                        }
+                    ) { Text("取消") }
+                }
+            }
+        }
+
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(22.dp),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 2.dp
         ) {
             Column(
-                Modifier.fillMaxWidth().padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                Modifier.fillMaxWidth().padding(horizontal = 9.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -2128,7 +2729,7 @@ internal fun CodexChatScreen(
                         value = prompt,
                         onValueChange = { prompt = it },
                         modifier = Modifier.weight(1f),
-                        minLines = 1,
+                        minLines = 2,
                         maxLines = 4,
                         enabled = !state.isSubmitting &&
                             state.pendingApproval == null && state.pendingUserInput == null,
@@ -2142,8 +2743,12 @@ internal fun CodexChatScreen(
                     )
                     Button(
                         onClick = { submitPrompt() },
+                        modifier = Modifier.width(76.dp),
                         enabled = prompt.isNotBlank() && !state.isSubmitting &&
-                            state.pendingApproval == null && state.pendingUserInput == null
+                            state.pendingApproval == null && state.pendingUserInput == null,
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                            horizontal = 8.dp, vertical = 14.dp
+                        )
                     ) {
                         if (state.isSubmitting) {
                             CircularProgressIndicator(
@@ -2151,19 +2756,28 @@ internal fun CodexChatScreen(
                                 strokeWidth = 2.dp
                             )
                         } else {
-                            Text(if (state.isWorking) "追加" else "发送")
+                            Text(
+                                when {
+                                    editingEntry != null -> "重发"
+                                    state.isWorking -> "追加"
+                                    else -> "发送"
+                                }
+                            )
                         }
                     }
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Box {
-                        TextButton(onClick = { toolsMenuExpanded = true }) {
-                            Text("＋ 工具")
-                        }
+                        TextButton(
+                            onClick = { toolsMenuExpanded = true },
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                                horizontal = 8.dp, vertical = 6.dp
+                            )
+                        ) { Text("＋ 工具") }
                         DropdownMenu(
                             expanded = toolsMenuExpanded,
                             onDismissRequest = { toolsMenuExpanded = false }
@@ -2227,6 +2841,7 @@ internal fun CodexChatScreen(
                         modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.labelSmall,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     TextButton(
@@ -2236,9 +2851,12 @@ internal fun CodexChatScreen(
                                 .edit()
                                 .putBoolean("enter_sends_message", enterSendsMessage)
                                 .apply()
-                        }
+                        },
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                            horizontal = 6.dp, vertical = 6.dp
+                        )
                     ) {
-                        Text(if (enterSendsMessage) "回车：发送" else "回车：换行")
+                        Text(if (enterSendsMessage) "回车发送" else "回车换行")
                     }
                     if (state.isWorking && !state.activeTurnId.isNullOrBlank()) {
                         TextButton(
@@ -2255,7 +2873,10 @@ internal fun CodexChatScreen(
                                         state.error = it.message ?: "停止任务失败"
                                     }
                                 }
-                            }
+                            },
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                                horizontal = 6.dp, vertical = 6.dp
+                            )
                         ) { Text("停止") }
                     }
                 }
@@ -2265,5 +2886,64 @@ internal fun CodexChatScreen(
     }
 }
 
+@Composable
+private fun ChatMessageActionMenu(
+    onCopy: () -> Unit,
+    onEditAndResend: (() -> Unit)? = null,
+    onRegenerate: (() -> Unit)? = null
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { expanded = true }) {
+            Text("⋯", style = MaterialTheme.typography.titleMedium)
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            DropdownMenuItem(
+                text = { Text("复制消息") },
+                onClick = {
+                    expanded = false
+                    onCopy()
+                }
+            )
+            if (onEditAndResend != null) {
+                DropdownMenuItem(
+                    text = { Text("编辑并重发") },
+                    onClick = {
+                        expanded = false
+                        onEditAndResend()
+                    }
+                )
+            }
+            if (onRegenerate != null) {
+                DropdownMenuItem(
+                    text = { Text("重新生成回答") },
+                    onClick = {
+                        expanded = false
+                        onRegenerate()
+                    }
+                )
+            }
+        }
+    }
+}
+
 private fun defaultWorkspace(home: File): String =
     CodexWorkspaceRepository(home).defaultWorkspace().canonicalPath
+
+
+private fun formatMessageTime(timestampMillis: Long): String =
+    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(timestampMillis))
+
+private fun formatElapsedTime(durationMillis: Long): String {
+    val safe = durationMillis.coerceAtLeast(0L)
+    if (safe < 1_000L) return "${safe} 毫秒"
+    val totalSeconds = safe / 1_000L
+    return if (totalSeconds < 60L) {
+        "${totalSeconds}.${(safe % 1_000L) / 100L} 秒"
+    } else {
+        "${totalSeconds / 60L} 分 ${totalSeconds % 60L} 秒"
+    }
+}

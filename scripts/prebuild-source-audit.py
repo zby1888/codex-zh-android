@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TEXT_SUFFIXES = {
     ".kt", ".kts", ".java", ".cpp", ".c", ".h", ".hpp", ".xml",
     ".py", ".sh", ".yml", ".yaml", ".json", ".properties",
-    ".gradle", ".toml"
+    ".gradle", ".toml", ".patch"
 }
 # Third-party repositories checked out for builds are pinned and validated separately.
 # Do not fail first-party source hygiene checks because of upstream formatting choices.
@@ -63,6 +63,7 @@ for path in sorted(ROOT.rglob("*")):
 # Cross-file regression guards for the terminal, composer and native callback lifetime.
 chat = (ROOT / "app/src/main/java/io/github/zby1888/codexzh/CodexChatScreen.kt").read_text()
 main = (ROOT / "app/src/main/java/io/github/zby1888/codexzh/MainActivity.kt").read_text()
+installer = (ROOT / "app/src/main/java/io/github/zby1888/codexzh/RuntimeBootstrapInstaller.kt").read_text()
 native = (ROOT / "app/src/main/cpp/native_pty_terminal.cpp").read_text()
 if "enter_sends_message" not in chat or "ImeAction.Default" not in chat or "ImeAction.Send" not in chat:
     errors.append("CodexChatScreen.kt: Enter-send/newline preference is missing")
@@ -101,6 +102,93 @@ if "VTermScreenCallbacks screenCallbacks{}" not in native or "&terminal->screenC
     errors.append("native_pty_terminal.cpp: libvterm callback lifetime regression")
 if "VTermScreenCallbacks callbacks{}" in native:
     errors.append("native_pty_terminal.cpp: stack-local callback struct is forbidden")
+
+
+if "RuntimeOnboardingScreen(" not in main or "runtimeInstaller.install {" not in main:
+    errors.append("MainActivity.kt: first-launch onboarding must install the bundled runtime before entering the app")
+if "AnimatedContent(" not in main or "rememberSaveableStateHolder()" not in main:
+    errors.append("MainActivity.kt: page transitions must be animated and preserve saveable page state")
+if "fun install(onProgress: (RuntimeInstallProgress) -> Unit = {})" not in installer:
+    errors.append("RuntimeBootstrapInstaller.kt: onboarding install progress callback is missing")
+if "正在校验内置文件" not in installer or "已处理 $entryCount 项文件" not in installer:
+    errors.append("RuntimeBootstrapInstaller.kt: install stages must report truthful progress")
+if 'appendCommandOutput(itemId, params.optString("delta"))' not in chat:
+    errors.append("CodexChatScreen.kt: command output deltas must be attached to their activity row")
+if "if (isActivity && text.isBlank()) return" not in chat or '"未知操作"' in chat:
+    errors.append("CodexChatScreen.kt: empty/generic execution placeholders must not appear")
+if "val preview = lines.firstOrNull()" not in chat or ".clickable { expanded = !expanded }" not in chat:
+    errors.append("CodexChatScreen.kt: execution details must be compact and expandable")
+if "ClipboardManager" not in chat or 'Text("复制消息")' not in chat:
+    errors.append("CodexChatScreen.kt: user, assistant and activity messages need a copy action")
+if "SelectionContainer" not in chat:
+    errors.append("CodexChatScreen.kt: message bodies must support native text selection")
+if "fun editAndResend(" not in chat or "agent.forkThread(sourceThreadId, previousTurnId)" not in chat:
+    errors.append("CodexChatScreen.kt: edit-and-resend must fork before the selected turn instead of appending to the source thread")
+if 'Text("编辑并重发")' not in chat or "val turnId: String? = null" not in chat:
+    errors.append("CodexChatScreen.kt: editable historical user messages need a visible action and stable turn metadata")
+if "isPlainTextOnly" not in chat or "userMessagesPerTurn[itemTurnId] == 1" not in chat:
+    errors.append("CodexChatScreen.kt: editing must be disabled for attachments and multiple user prompts sharing a turn")
+
+chat_state = chat
+mcp_controller = (ROOT / "app/src/main/java/io/github/zby1888/codexzh/CodexMcpController.kt").read_text()
+app_server_client = (ROOT / "app/src/main/java/io/github/zby1888/codexzh/CodexAppServerClient.kt").read_text()
+setup_wizard = (ROOT / "app/src/main/java/io/github/zby1888/codexzh/CodexSetupWizardScreen.kt").read_text()
+mcp_screen = (ROOT / "app/src/main/java/io/github/zby1888/codexzh/CodexMcpScreen.kt").read_text()
+if "CodexChatUiState(context)" not in main or "internal class CodexChatUiState(context: Context)" not in chat_state:
+    errors.append("CodexChatScreen.kt/MainActivity.kt: chat preferences must survive Activity/process recreation")
+if 'selected_model_id' not in chat_state or 'selected_reasoning_effort' not in chat_state or "persistModelSelection()" not in chat_state:
+    errors.append("CodexChatScreen.kt: model and reasoning selection must be persisted")
+if "LaunchedEffect(autoStartAttempt)" not in chat_state or "agent.listModels(includeHidden = false)" not in chat_state:
+    errors.append("CodexChatScreen.kt: Codex App Server and model list must start automatically on chat entry")
+if "重新连接 Codex" not in chat_state:
+    errors.append("CodexChatScreen.kt: automatic startup failure must offer a retry action")
+if 'client.request("config/mcpServer/reload", null)' not in mcp_controller:
+    errors.append("CodexMcpController.kt: MCP reload must use the pinned protocol method without params")
+if '"mcpServer/refresh"' in mcp_controller:
+    errors.append("CodexMcpController.kt: obsolete MCP refresh RPC must not be used")
+if "toolsAndAuthOnly" not in mcp_controller or 'if (params != null) requestMessage.put("params", params)' not in app_server_client:
+    errors.append("Codex MCP status listing must use lightweight detail and support omitted JSON-RPC params")
+if "Icon(item.icon()" not in main or "alwaysShowLabel = false" not in main or "material-icons-extended" not in (ROOT / "app/build.gradle.kts").read_text():
+    errors.append("MainActivity.kt: navigation must use compact vector icons rather than text glyphs")
+if "Root 权限管理" not in main or "showRootDetails" not in main:
+    errors.append("MainActivity.kt: Root permission entry must be visible without scrolling the terminal shortcut row")
+composer_start = chat_state.rfind("shape = RoundedCornerShape(22.dp)")
+composer = chat_state[composer_start:] if composer_start >= 0 else ""
+if "minLines = 2" not in composer or "modifier = Modifier.weight(1f)" not in composer:
+    errors.append("CodexChatScreen.kt: composer input must be multiline and take the available horizontal width")
+if "Button(\n                        onClick = { submitPrompt() }" not in composer or "modifier = Modifier.width(76.dp)" not in composer:
+    errors.append("CodexChatScreen.kt: send button must sit beside the input in the same horizontal row")
+if "CodexSetupWizardScreen(" not in main or "saveAndConnect()" not in setup_wizard:
+    errors.append("MainActivity.kt: first-run onboarding must guide the user through server setup")
+if "API 基础地址" not in setup_wizard or "API Key" not in setup_wizard or "选择模型" not in setup_wizard:
+    errors.append("CodexSetupWizardScreen.kt: onboarding must cover endpoint, credentials and model selection")
+if "服务商设置" in mcp_screen or "onOpenProviders" in mcp_screen:
+    errors.append("CodexMcpScreen.kt: provider settings shortcut must not be present on the MCP page")
+if "formatMessageTime" not in chat_state or "formatElapsedTime" not in chat_state or "recordTurnDuration" not in chat_state:
+    errors.append("CodexChatScreen.kt: message timestamps and actual turn-duration display are missing")
+
+launcher_patch = (ROOT / "runtime/patches/codex-android-current-exe.patch").read_text(encoding="utf-8")
+launcher_patch_script = (ROOT / "scripts/apply-codex-android-launcher-patch.py").read_text(encoding="utf-8")
+runtime_marker_script = (ROOT / "scripts/mark-private-runtime-bootstrap.py").read_text(encoding="utf-8")
+runtime_manager_source = (ROOT / "app/src/main/java/io/github/zby1888/codexzh/RuntimeManager.kt").read_text(encoding="utf-8")
+runtime_installer_source = (ROOT / "app/src/main/java/io/github/zby1888/codexzh/RuntimeBootstrapInstaller.kt").read_text(encoding="utf-8")
+runtime_validator_source = (ROOT / "scripts/validate-private-runtime-bootstrap.py").read_text(encoding="utf-8")
+if (
+    "fn current_executable_path() -> Option<PathBuf>" not in launcher_patch
+    or 'std::env::var_os("TERMUX_EXEC__PROC_SELF_EXE")' not in launcher_patch
+    or "code_mode_host_program_from_exe(current_executable_path().as_deref())" not in launcher_patch
+):
+    errors.append("Codex Android patch must resolve the linker-launched executable for InstallContext and Code Mode host")
+if "codex-android-current-exe.patch" not in launcher_patch_script or "TERMUX_PKG_BUILDER_DIR" not in launcher_patch_script:
+    errors.append("Pinned Termux Codex recipe must apply the Android current_exe patch")
+if "codexAndroidCurrentExe" not in runtime_marker_script:
+    errors.append("Private runtime archive must carry the Android launcher patch marker")
+if "REQUIRED_ANDROID_PATCH_ID" not in runtime_manager_source or "paths.codexCodeModeHost" not in runtime_manager_source:
+    errors.append("RuntimeManager must reject stale runtimes and verify the Code Mode host")
+if "runtimePatches" not in runtime_installer_source or "REQUIRED_ANDROID_PATCH_ID" not in runtime_installer_source:
+    errors.append("Android installer must verify the runtime patch marker")
+if "RUNTIME_PATCH_MARKER" not in runtime_validator_source or "runtimePatches" not in runtime_validator_source:
+    errors.append("Runtime archive validator must reject unpatched bootstrap artifacts")
 
 if errors:
     print("PREBUILD SOURCE AUDIT FAILED")

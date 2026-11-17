@@ -14,21 +14,23 @@ internal class CodexMcpController(
         threadId: String? = null,
         serverName: String? = null,
         cursor: String? = null,
-        limit: Int? = null
+        limit: Int? = null,
+        detail: String? = "toolsAndAuthOnly"
     ): JSONObject {
         val params = JSONObject()
         if (!threadId.isNullOrBlank()) params.put("threadId", threadId)
         if (!serverName.isNullOrBlank()) params.put("serverName", serverName)
         if (!cursor.isNullOrBlank()) params.put("cursor", cursor)
         if (limit != null) params.put("limit", limit)
+        if (!detail.isNullOrBlank()) params.put("detail", detail)
         return client.request("mcpServerStatus/list", params)
     }
 
+    /** Reload the active Codex MCP registry; this JSON-RPC method has no params. */
     fun refreshServers(): JSONObject =
-        client.request("mcpServer/refresh", JSONObject())
+        client.request("config/mcpServer/reload", null)
 
-    fun reloadConfiguration(): JSONObject =
-        client.request("config/mcpServer/reload", JSONObject())
+    fun reloadConfiguration(): JSONObject = refreshServers()
 
     /**
      * Adds or updates one MCP server in the private CODEX_HOME config.

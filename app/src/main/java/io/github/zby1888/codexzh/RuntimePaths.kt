@@ -25,6 +25,7 @@ internal data class RuntimePaths(
     val jq: File get() = File(bin, "jq")
     val codex: File get() = File(bin, "codex")
     val codexCodeModeHost: File get() = File(bin, "codex-code-mode-host")
+    val runtimePatchMarker: File get() = File(prefix, "share/codex-zh-android/runtime-patches.json")
     val execPreload: File get() = File(prefix, "lib/libtermux-exec-ld-preload.so")
     val systemLinker64: File get() = File("/system/bin/linker64")
 

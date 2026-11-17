@@ -115,7 +115,7 @@ internal class CodexAppServerClient(
     /** Sends a JSON-RPC request and waits for its matching response. */
     fun request(
         method: String,
-        params: JSONObject = JSONObject(),
+        params: JSONObject? = JSONObject(),
         timeoutMillis: Long = DEFAULT_TIMEOUT_MS
     ): JSONObject {
         check(isAlive) { "Codex App Server 尚未启动或已经退出" }
@@ -127,12 +127,11 @@ internal class CodexAppServerClient(
         check(pending.putIfAbsent(key, response) == null) { "请求 ID 冲突" }
 
         try {
-            writeMessage(
-                JSONObject()
-                    .put("id", id)
-                    .put("method", method)
-                    .put("params", params)
-            )
+            val requestMessage = JSONObject()
+                .put("id", id)
+                .put("method", method)
+            if (params != null) requestMessage.put("params", params)
+            writeMessage(requestMessage)
             val message = response.get(timeoutMillis, TimeUnit.MILLISECONDS)
             val error = message.optJSONObject("error")
             if (error != null) {

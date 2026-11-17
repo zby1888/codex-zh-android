@@ -1,0 +1,24 @@
+--- a/install-context/src/lib.rs
++++ b/install-context/src/lib.rs
+@@ -21,1 +21,15 @@
+ static INSTALL_CONTEXT: OnceLock<InstallContext> = OnceLock::new();
++
++// Android 10+ launches app-private ELF binaries through linker64. In that
++// mode std::env::current_exe() can resolve to /system/bin/linker64 instead
++// of the Codex ELF. The Android launcher supplies the real executable path.
++fn current_executable_path() -> Option<PathBuf> {
++    #[cfg(target_os = "android")]
++    if let Some(path) = std::env::var_os("TERMUX_EXEC__PROC_SELF_EXE") {
++        let path = PathBuf::from(path);
++        if path.is_absolute() && path.is_file() {
++            return Some(path);
++        }
++    }
++    std::env::current_exe().ok()
++}
+@@ -122,1 +136,1 @@
+-            let current_exe = std::env::current_exe().ok();
++            let current_exe = current_executable_path();
+@@ -179,1 +193,1 @@
+-                || self.code_mode_host_program_from_exe(std::env::current_exe().ok().as_deref()),
++                || self.code_mode_host_program_from_exe(current_executable_path().as_deref()),
