@@ -13,6 +13,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MAX_ENTRY_BYTES = 256 * 1024 * 1024
 MAX_TOTAL_BYTES = 768 * 1024 * 1024
+RUNTIME_PATCH_MARKER = "share/codex-zh-android/runtime-patches.json"
+RUNTIME_PATCH_ID = "termux-proc-self-exe-v1"
 CONFIG = json.loads((ROOT / "runtime/private-runtime-config.json").read_text(encoding="utf-8"))
 
 
@@ -116,6 +118,14 @@ def main() -> None:
         }
         if "SYMLINKS.txt" not in names:
             raise SystemExit("Bootstrap archive is missing SYMLINKS.txt")
+        if RUNTIME_PATCH_MARKER not in names:
+            raise SystemExit("Bootstrap is missing the Android linker/current_exe runtime patch marker")
+        try:
+            runtime_patches = json.loads(zf.read(RUNTIME_PATCH_MARKER).decode("utf-8"))
+        except Exception as error:
+            raise SystemExit(f"Android runtime patch marker is invalid: {error}") from error
+        if runtime_patches.get("codexAndroidCurrentExe") != RUNTIME_PATCH_ID:
+            raise SystemExit("Bootstrap does not contain the required Android linker/current_exe fix")
         raw_links = zf.read("SYMLINKS.txt").decode("utf-8")
         links: dict[str, str] = {}
         for line in raw_links.splitlines():
@@ -134,6 +144,7 @@ def main() -> None:
             "bin/bash", "bin/env", "bin/git", "bin/rg",
             "lib/libtermux-exec-ld-preload.so",
             f"bin/{CONFIG['codexPackage']}", f"bin/{CONFIG['codexHelper']}",
+            RUNTIME_PATCH_MARKER,
         ]
         missing = [path for path in required if path not in names and path not in links]
         if missing:
@@ -173,6 +184,7 @@ def main() -> None:
         "codexSourceRef": locked_ref("codex"),
         "packages": CONFIG["packages"],
         "optionalPackageProfiles": CONFIG.get("optionalPackageProfiles", {}),
+        "runtimePatches": runtime_patches,
         "archive": archive.name,
         "archiveSize": archive.stat().st_size,
         "sha256": digest,
