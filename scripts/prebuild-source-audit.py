@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TEXT_SUFFIXES = {
     ".kt", ".kts", ".java", ".cpp", ".c", ".h", ".hpp", ".xml",
     ".py", ".sh", ".yml", ".yaml", ".json", ".properties",
-    ".gradle", ".toml"
+    ".gradle", ".toml", ".patch"
 }
 # Third-party repositories checked out for builds are pinned and validated separately.
 # Do not fail first-party source hygiene checks because of upstream formatting choices.
@@ -166,6 +166,29 @@ if "服务商设置" in mcp_screen or "onOpenProviders" in mcp_screen:
     errors.append("CodexMcpScreen.kt: provider settings shortcut must not be present on the MCP page")
 if "formatMessageTime" not in chat_state or "formatElapsedTime" not in chat_state or "recordTurnDuration" not in chat_state:
     errors.append("CodexChatScreen.kt: message timestamps and actual turn-duration display are missing")
+
+launcher_patch = (ROOT / "runtime/patches/codex-android-current-exe.patch").read_text(encoding="utf-8")
+launcher_patch_script = (ROOT / "scripts/apply-codex-android-launcher-patch.py").read_text(encoding="utf-8")
+runtime_marker_script = (ROOT / "scripts/mark-private-runtime-bootstrap.py").read_text(encoding="utf-8")
+runtime_manager_source = (ROOT / "app/src/main/java/io/github/zby1888/codexzh/RuntimeManager.kt").read_text(encoding="utf-8")
+runtime_installer_source = (ROOT / "app/src/main/java/io/github/zby1888/codexzh/RuntimeBootstrapInstaller.kt").read_text(encoding="utf-8")
+runtime_validator_source = (ROOT / "scripts/validate-private-runtime-bootstrap.py").read_text(encoding="utf-8")
+if (
+    "fn current_executable_path() -> Option<PathBuf>" not in launcher_patch
+    or 'std::env::var_os("TERMUX_EXEC__PROC_SELF_EXE")' not in launcher_patch
+    or "code_mode_host_program_from_exe(current_executable_path().as_deref())" not in launcher_patch
+):
+    errors.append("Codex Android patch must resolve the linker-launched executable for InstallContext and Code Mode host")
+if "codex-android-current-exe.patch" not in launcher_patch_script or "TERMUX_PKG_BUILDER_DIR" not in launcher_patch_script:
+    errors.append("Pinned Termux Codex recipe must apply the Android current_exe patch")
+if "codexAndroidCurrentExe" not in runtime_marker_script:
+    errors.append("Private runtime archive must carry the Android launcher patch marker")
+if "REQUIRED_ANDROID_PATCH_ID" not in runtime_manager_source or "paths.codexCodeModeHost" not in runtime_manager_source:
+    errors.append("RuntimeManager must reject stale runtimes and verify the Code Mode host")
+if "runtimePatches" not in runtime_installer_source or "REQUIRED_ANDROID_PATCH_ID" not in runtime_installer_source:
+    errors.append("Android installer must verify the runtime patch marker")
+if "RUNTIME_PATCH_MARKER" not in runtime_validator_source or "runtimePatches" not in runtime_validator_source:
+    errors.append("Runtime archive validator must reject unpatched bootstrap artifacts")
 
 if errors:
     print("PREBUILD SOURCE AUDIT FAILED")
