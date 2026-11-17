@@ -292,6 +292,12 @@ internal class RuntimeBootstrapInstaller(
         }
         check(paths.codex.canExecute()) { "Codex CLI 没有执行权限" }
         check(paths.codexCodeModeHost.canExecute()) { "Code Mode host 没有执行权限" }
+        val patchMarker = paths.runtimePatchMarker
+        check(patchMarker.isFile) { "私有运行环境缺少 Android Code Mode 路径修复标记" }
+        val patch = JSONObject(patchMarker.readText(Charsets.UTF_8))
+        check(patch.optString("codexAndroidCurrentExe") == REQUIRED_ANDROID_PATCH_ID) {
+            "私有运行环境中的 Android Code Mode 路径修复版本不匹配"
+        }
     }
 
     private fun writeRuntimeMarker(manifest: JSONObject) {
